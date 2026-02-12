@@ -1,13 +1,13 @@
 {
   "domain": "exchange_calendar",
   "name": "Exchange Calendar",
-  "version": "1.0.0",
   "codeowners": ["@bohemtucsok"],
-  "documentation": "https://github.com/bohemtucsok/homeassistant-exchange-calendar",
-  "issue_tracker": "https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues",
-  "requirements": ["exchangelib==5.4.3"],
+  "config_flow": true,
   "dependencies": [],
+  "documentation": "https://github.com/bohemtucsok/homeassistant-exchange-calendar",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "config_flow": true
+  "issue_tracker": "https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues",
+  "requirements": ["exchangelib==5.4.3"],
+  "version": "1.0.0"
 }
