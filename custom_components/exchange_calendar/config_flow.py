@@ -25,6 +25,7 @@ from .const import (
     CONF_MAX_EVENTS,
     CONF_UPDATE_INTERVAL,
     CONF_READ_ONLY,
+    AUTH_TYPE_BASIC,
     AUTH_TYPE_NTLM,
     AUTH_TYPE_OAUTH2,
     DEFAULT_DAYS_TO_FETCH,
@@ -55,8 +56,11 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Step 1: Choose authentication type."""
         if user_input is not None:
-            if user_input[CONF_AUTH_TYPE] == AUTH_TYPE_NTLM:
+            auth_type = user_input[CONF_AUTH_TYPE]
+            if auth_type == AUTH_TYPE_NTLM:
                 return await self.async_step_ntlm()
+            if auth_type == AUTH_TYPE_BASIC:
+                return await self.async_step_basic()
             return await self.async_step_oauth2()
 
         return self.async_show_form(
@@ -66,6 +70,7 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_AUTH_TYPE, default=AUTH_TYPE_NTLM): vol.In(
                         {
                             AUTH_TYPE_NTLM: "On-premise (NTLM)",
+                            AUTH_TYPE_BASIC: "Basic (EWS)",
                             AUTH_TYPE_OAUTH2: "Office 365 (OAuth2)",
                         }
                     ),
@@ -161,6 +166,66 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         CONF_ALLOW_INSECURE_SSL, default=DEFAULT_ALLOW_INSECURE_SSL
                     ): bool,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"error_detail": self._last_error_detail},
+        )
+
+    async def async_step_basic(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 2c: Basic (EWS) credentials for AWS WorkMail and similar."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                client = ExchangeClient(
+                    auth_type=AUTH_TYPE_BASIC,
+                    server=user_input[CONF_SERVER],
+                    email=user_input[CONF_EMAIL],
+                    username=user_input.get(CONF_USERNAME, user_input[CONF_EMAIL]),
+                    password=user_input[CONF_PASSWORD],
+                )
+                await self.hass.async_add_executor_job(client.validate_connection)
+            except ExchangeAuthError as err:
+                self._last_error_detail = str(err)
+                _LOGGER.error("Basic auth failed: %s", err)
+                errors["base"] = "invalid_auth"
+                self._send_debug_notification("Basic Auth Error", err)
+            except ExchangeConnectionError as err:
+                self._last_error_detail = str(err)
+                _LOGGER.error("Basic connection failed: %s", err)
+                errors["base"] = "cannot_connect"
+                self._send_debug_notification("Basic Connection Error", err)
+            except Exception as err:
+                self._last_error_detail = str(err)
+                _LOGGER.exception("Unexpected error during Basic validation: %s", err)
+                errors["base"] = "unknown"
+                self._send_debug_notification("Basic Unexpected Error", err)
+            else:
+                await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
+                self._abort_if_unique_id_configured()
+
+                self._auth_data = {
+                    CONF_AUTH_TYPE: AUTH_TYPE_BASIC,
+                    CONF_SERVER: user_input[CONF_SERVER],
+                    CONF_EMAIL: user_input[CONF_EMAIL],
+                    CONF_USERNAME: user_input.get(
+                        CONF_USERNAME, user_input[CONF_EMAIL]
+                    ),
+                    CONF_PASSWORD: user_input[CONF_PASSWORD],
+                }
+                return await self.async_step_options()
+
+        return self.async_show_form(
+            step_id="basic",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SERVER): str,
+                    vol.Required(CONF_EMAIL): str,
+                    vol.Optional(CONF_USERNAME): str,
+                    vol.Required(CONF_PASSWORD): str,
                 }
             ),
             errors=errors,

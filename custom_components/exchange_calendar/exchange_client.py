@@ -11,6 +11,7 @@ from typing import Any
 
 from exchangelib import (
     Account,
+    BASIC,
     CalendarItem,
     Configuration,
     Credentials,
@@ -35,7 +36,7 @@ from exchangelib.errors import (
 from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
 from exchangelib.items import SEND_TO_NONE, SEND_TO_ALL_AND_SAVE_COPY
 
-from .const import AUTH_TYPE_NTLM, AUTH_TYPE_OAUTH2
+from .const import AUTH_TYPE_BASIC, AUTH_TYPE_NTLM, AUTH_TYPE_OAUTH2
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ class ExchangeClient:
 
     def _build_credentials(self):
         """Build credentials based on auth type."""
-        if self._auth_type == AUTH_TYPE_NTLM:
+        if self._auth_type in (AUTH_TYPE_NTLM, AUTH_TYPE_BASIC):
             username = self._username
             if self._domain and "\\" not in username and "@" not in username:
                 username = f"{self._domain}\\{username}"
@@ -149,6 +150,13 @@ class ExchangeClient:
                 server=self._server,
                 credentials=credentials,
                 auth_type=NTLM,
+            )
+
+        if self._auth_type == AUTH_TYPE_BASIC:
+            return Configuration(
+                server=self._server,
+                credentials=credentials,
+                auth_type=BASIC,
             )
 
         # OAuth2 - Office 365
