@@ -260,15 +260,11 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow handler."""
-        return ExchangeCalendarOptionsFlow(config_entry)
+        return ExchangeCalendarOptionsFlow()
 
 
 class ExchangeCalendarOptionsFlow(OptionsFlow):
     """Handle options flow for Exchange Calendar."""
-
-    def __init__(self, config_entry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
