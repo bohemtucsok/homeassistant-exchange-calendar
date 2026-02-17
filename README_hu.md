@@ -179,6 +179,7 @@ A kezdeti beállítás után módosíthatod az opciókat: **Beállítások** > *
 - [x] Basic EWS hitelesítés (AWS WorkMail)
 - [x] Hangasszisztens (Assist pipeline) támogatás
 - [ ] **Microsoft Graph API migráció Office 365-höz** — Az EWS [2026 októberében megszűnik Exchange Online-on](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online). Az on-premise (NTLM) nem érintett. Lásd [#3](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/3).
+- [ ] Exchange feladatok megjelenítése Home Assistant feladatlista entitásként
 - [ ] Megosztott / szoba naptár támogatás
 - [ ] Több naptár támogatás fiókonként
 - [ ] Személyes Microsoft fiók támogatás
