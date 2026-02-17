@@ -5,6 +5,7 @@ DOMAIN = "exchange_calendar"
 
 # Authentication types
 AUTH_TYPE_NTLM = "ntlm"
+AUTH_TYPE_BASIC = "basic"
 AUTH_TYPE_OAUTH2 = "oauth2"
 
 # Configuration keys (stored in config_entry.data)
