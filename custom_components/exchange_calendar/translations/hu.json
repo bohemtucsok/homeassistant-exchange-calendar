@@ -26,6 +26,21 @@
           "domain": "pl. MYDOMAIN (DOMAIN\\felhaszn\u00e1l\u00f3n\u00e9v form\u00e1tumhoz)"
         }
       },
+      "basic": {
+        "title": "Basic hiteles\u00edt\u00e9s (EWS)",
+        "description": "Add meg az EWS szerver adatait \u00e9s a bejelentkez\u00e9si adatokat. Haszn\u00e1ld ezt AWS WorkMail \u00e9s m\u00e1s Basic hiteles\u00edt\u00e9st haszn\u00e1l\u00f3 szerverekhez.",
+        "data": {
+          "server": "EWS szerver hosztn\u00e9v",
+          "email": "E-mail c\u00edm",
+          "username": "Felhaszn\u00e1l\u00f3n\u00e9v (opcion\u00e1lis, ha k\u00fcl\u00f6nb\u00f6zik az e-mail c\u00edmt\u0151l)",
+          "password": "Jelsz\u00f3"
+        },
+        "data_description": {
+          "server": "pl. ews.mail.us-west-2.awsapps.com",
+          "email": "pl. felhasznalo@example.com",
+          "username": "Hagyd \u00fcresen az e-mail c\u00edm haszn\u00e1lat\u00e1hoz"
+        }
+      },
       "oauth2": {
         "title": "Office 365 (OAuth2)",
         "description": "Add meg az Azure AD alkalmaz\u00e1s hiteles\u00edt\u0151 adatait. Sz\u00fcks\u00e9ges egy regisztr\u00e1lt alkalmaz\u00e1s az Azure AD-ben Calendars.ReadWrite jogosults\u00e1ggal.",

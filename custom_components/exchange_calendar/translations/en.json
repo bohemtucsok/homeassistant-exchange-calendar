@@ -26,6 +26,21 @@
           "domain": "e.g., MYDOMAIN (for DOMAIN\\username format)"
         }
       },
+      "basic": {
+        "title": "Basic Authentication (EWS)",
+        "description": "Enter your EWS server details and credentials. Use this for AWS WorkMail and other servers that use Basic authentication.",
+        "data": {
+          "server": "EWS server hostname",
+          "email": "Email address",
+          "username": "Username (optional, if different from email)",
+          "password": "Password"
+        },
+        "data_description": {
+          "server": "e.g., ews.mail.us-west-2.awsapps.com",
+          "email": "e.g., user@example.com",
+          "username": "Leave empty to use email address"
+        }
+      },
       "oauth2": {
         "title": "Office 365 (OAuth2)",
         "description": "Enter your Azure AD application credentials. You need to register an app in Azure AD with Calendars.ReadWrite permission.",
