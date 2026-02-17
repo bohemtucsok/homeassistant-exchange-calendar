@@ -16,6 +16,7 @@ Supports both **on-premise Exchange** (NTLM) and **Office 365** (OAuth2) with fu
 - **Update** existing events
 - **Delete** events
 - On-premise Exchange (NTLM authentication)
+- Basic EWS authentication (AWS WorkMail and similar)
 - Office 365 / Microsoft 365 (OAuth2 authentication)
 - Self-signed SSL certificate support
 - Configurable polling interval, date range, and event limits
@@ -192,6 +193,7 @@ After initial setup, you can modify these options via **Settings** > **Devices &
 - [x] On-premise Exchange support (NTLM)
 - [x] Office 365 support (OAuth2) via EWS
 - [x] Read-only mode option
+- [x] Basic EWS authentication (AWS WorkMail)
 - [x] Voice assistant (Assist pipeline) support
 - [ ] **Microsoft Graph API migration for Office 365** — EWS will be [deprecated for Exchange Online in October 2026](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online). On-premise (NTLM) is not affected. See [#3](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/3).
 - [ ] Shared / room calendar support
