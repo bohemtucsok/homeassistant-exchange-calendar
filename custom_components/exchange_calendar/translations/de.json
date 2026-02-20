@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Exchange Kalender Einrichtung",
+        "description": "Wählen Sie Ihre Exchange-Authentifizierungsmethode.",
+        "data": {
+          "auth_type": "Authentifizierungsart"
+        }
+      },
+      "ntlm": {
+        "title": "On-Premise Exchange (NTLM)",
+        "description": "Geben Sie Ihre Exchange-Serverdetails und Anmeldedaten ein.",
+        "data": {
+          "server": "Exchange-Server Hostname",
+          "email": "E-Mail-Adresse",
+          "username": "Benutzername (optional, falls abweichend von E-Mail)",
+          "password": "Passwort",
+          "domain": "Windows-Domäne (optional)",
+          "allow_insecure_ssl": "Unsicheres SSL zulassen (selbstsignierte Zertifikate)"
+        },
+        "data_description": {
+          "server": "z.B. mail.beispiel.de",
+          "email": "z.B. nutzer@beispiel.de",
+          "username": "Leer lassen, um E-Mail-Adresse zu verwenden",
+          "domain": "z.B. MEINEDOMAENE (für DOMÄNE\\Benutzername Format)"
+        }
+      },
+      "oauth2": {
+        "title": "Office 365 (OAuth2)",
+        "description": "Geben Sie Ihre Azure AD-Anwendungsdaten ein. Sie müssen eine App im Azure AD mit der Berechtigung 'Calendars.ReadWrite' registrieren.",
+        "data": {
+          "email": "E-Mail-Adresse",
+          "tenant_id": "Azure AD Tenant-ID",
+          "client_id": "Anwendungs- (Client) ID",
+          "client_secret": "Client-Geheimnis (Secret)"
+        },
+        "data_description": {
+          "tenant_id": "Zu finden unter Azure AD > App-Registrierungen > Übersicht",
+          "client_id": "Zu finden unter Azure AD > App-Registrierungen > Übersicht",
+          "client_secret": "Zu finden unter Azure AD > App-Registrierungen > Zertifikate & Geheimnisse"
+        }
+      },
+      "options": {
+        "title": "Kalender-Optionen",
+        "description": "Konfigurieren Sie die Einstellungen zum Abrufen des Kalenders.",
+        "data": {
+          "days_to_fetch": "Vorausschauend abzurufende Tage",
+          "max_events": "
