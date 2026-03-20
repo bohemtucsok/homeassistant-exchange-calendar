@@ -42,8 +42,8 @@
         }
       },
       "oauth2": {
-        "title": "Office 365 (OAuth2)",
-        "description": "Add meg az Azure AD alkalmaz\u00e1s hiteles\u00edt\u0151 adatait. Sz\u00fcks\u00e9ges egy regisztr\u00e1lt alkalmaz\u00e1s az Azure AD-ben Calendars.ReadWrite jogosults\u00e1ggal.",
+        "title": "Office 365 (Graph API)",
+        "description": "Add meg az Azure AD alkalmaz\u00e1s hiteles\u00edt\u0151 adatait. Sz\u00fcks\u00e9ges Application jogosults\u00e1gok: Calendars.ReadWrite \u00e9s User.Read.All (admin j\u00f3v\u00e1hagy\u00e1ssal).",
         "data": {
           "email": "E-mail c\u00edm",
           "tenant_id": "Azure AD B\u00e9rl\u0151 azonos\u00edt\u00f3 (Tenant ID)",

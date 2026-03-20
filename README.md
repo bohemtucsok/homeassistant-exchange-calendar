@@ -3,9 +3,9 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Home Assistant custom integration for Microsoft Exchange calendars via EWS (Exchange Web Services).
+A Home Assistant custom integration for Microsoft Exchange calendars.
 
-Supports both **on-premise Exchange** (NTLM) and **Office 365** (OAuth2) with full CRUD operations.
+Supports **on-premise Exchange** (NTLM/Basic via EWS) and **Office 365** (via Microsoft Graph API) with full CRUD operations.
 
 > Based on the [MMM-Exchange](https://github.com/bohemtucsok/MMM-Exchange) MagicMirror module, ported to Python/Home Assistant.
 
@@ -63,7 +63,9 @@ Supports both **on-premise Exchange** (NTLM) and **Office 365** (OAuth2) with fu
 > - `domain` -> Windows domain
 > - `allowInsecureSSL` -> Allow insecure SSL
 
-### Office 365 (OAuth2)
+### Office 365 (Graph API)
+
+Uses the Microsoft Graph API for Office 365 / Microsoft 365 mailboxes.
 
 #### Prerequisites: Azure AD App Registration
 
@@ -76,20 +78,22 @@ Supports both **on-premise Exchange** (NTLM) and **Office 365** (OAuth2) with fu
    - Note the **Value** (this is your Client Secret)
 5. Go to **API permissions** > **Add a permission**
    - Select **Microsoft Graph** > **Application permissions**
-   - Add: `Calendars.ReadWrite`
-   - Click **Grant admin consent**
+   - Add: `Calendars.ReadWrite` and `User.Read.All`
+   - Click **Grant admin consent** for both permissions
 
 #### Home Assistant Setup
 
 1. Go to **Settings** > **Devices & Services** > **Add Integration**
 2. Search for "Exchange Calendar"
-3. Select **Office 365 (OAuth2)**
+3. Select **Office 365 (Graph API)**
 4. Fill in:
    - **Email address**: The mailbox email
    - **Azure AD Tenant ID**: From app registration
    - **Application (Client) ID**: From app registration
    - **Client Secret**: From app registration
 5. Configure calendar options
+
+> **Upgrading from v1.x (EWS/OAuth2)?** You need to add the `User.Read.All` Application permission to your Azure AD app and grant admin consent. Your existing configuration will continue to work.
 
 ## Usage
 
@@ -153,7 +157,7 @@ After initial setup, you can modify these options via **Settings** > **Devices &
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| Days to fetch | 14 | How many days ahead to fetch events |
+| Days to fetch | 30 | How many days ahead to fetch events (minimum 30) |
 | Max events | 50 | Maximum number of events to display |
 | Update interval | 5 min | How often to poll the Exchange server |
 
@@ -195,7 +199,8 @@ After initial setup, you can modify these options via **Settings** > **Devices &
 - [x] Read-only mode option
 - [x] Basic EWS authentication (AWS WorkMail)
 - [x] Voice assistant (Assist pipeline) support
-- [ ] **Microsoft Graph API migration for Office 365** — EWS will be [deprecated for Exchange Online in October 2026](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online). On-premise (NTLM) is not affected. See [#3](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/3).
+- [x] **Microsoft Graph API migration for Office 365** — Office 365 now uses Graph API instead of EWS. On-premise (NTLM/Basic) continues to use EWS. See [#3](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/3).
+- [x] Past events browsing — Calendar view now supports browsing past events
 - [ ] Exchange Tasks as Home Assistant to-do list entities
 - [ ] Shared / room calendar support
 - [ ] Multiple calendar support per account

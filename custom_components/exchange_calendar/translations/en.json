@@ -42,8 +42,8 @@
         }
       },
       "oauth2": {
-        "title": "Office 365 (OAuth2)",
-        "description": "Enter your Azure AD application credentials. You need to register an app in Azure AD with Calendars.ReadWrite permission.",
+        "title": "Office 365 (Graph API)",
+        "description": "Enter your Azure AD application credentials. Required Application permissions: Calendars.ReadWrite and User.Read.All (with admin consent).",
         "data": {
           "email": "Email address",
           "tenant_id": "Azure AD Tenant ID",

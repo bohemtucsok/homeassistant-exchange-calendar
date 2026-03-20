@@ -22,7 +22,7 @@ from .const import (
     DEFAULT_ALLOW_INSECURE_SSL,
 )
 from .coordinator import ExchangeCalendarCoordinator
-from .exchange_client import ExchangeClient
+from .exchange_client import create_client
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ExchangeCalendarConfigEntry
 ) -> bool:
     """Set up Exchange Calendar from a config entry."""
-    client = ExchangeClient(
+    client = create_client(
         auth_type=entry.data[CONF_AUTH_TYPE],
         email=entry.data[CONF_EMAIL],
         server=entry.data.get(CONF_SERVER),

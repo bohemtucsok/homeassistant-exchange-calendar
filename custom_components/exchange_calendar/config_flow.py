@@ -36,7 +36,7 @@ from .const import (
 )
 from homeassistant.components import persistent_notification
 
-from .exchange_client import ExchangeClient, ExchangeAuthError, ExchangeConnectionError
+from .exchange_client import create_client, ExchangeAuthError, ExchangeConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                         {
                             AUTH_TYPE_NTLM: "On-premise (NTLM)",
                             AUTH_TYPE_BASIC: "Basic (EWS)",
-                            AUTH_TYPE_OAUTH2: "Office 365 (OAuth2)",
+                            AUTH_TYPE_OAUTH2: "Office 365 (Graph API)",
                         }
                     ),
                 }
@@ -108,7 +108,7 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                client = ExchangeClient(
+                client = create_client(
                     auth_type=AUTH_TYPE_NTLM,
                     server=user_input[CONF_SERVER],
                     email=user_input[CONF_EMAIL],
@@ -180,7 +180,7 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                client = ExchangeClient(
+                client = create_client(
                     auth_type=AUTH_TYPE_BASIC,
                     server=user_input[CONF_SERVER],
                     email=user_input[CONF_EMAIL],
@@ -240,7 +240,7 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                client = ExchangeClient(
+                client = create_client(
                     auth_type=AUTH_TYPE_OAUTH2,
                     email=user_input[CONF_EMAIL],
                     client_id=user_input[CONF_CLIENT_ID],
@@ -307,7 +307,7 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional(
                         CONF_DAYS_TO_FETCH, default=DEFAULT_DAYS_TO_FETCH
-                    ): vol.All(int, vol.Range(min=1, max=90)),
+                    ): vol.All(int, vol.Range(min=30, max=90)),
                     vol.Optional(
                         CONF_MAX_EVENTS, default=DEFAULT_MAX_EVENTS
                     ): vol.All(int, vol.Range(min=1, max=500)),
@@ -347,7 +347,7 @@ class ExchangeCalendarOptionsFlow(OptionsFlow):
                         default=self.config_entry.options.get(
                             CONF_DAYS_TO_FETCH, DEFAULT_DAYS_TO_FETCH
                         ),
-                    ): vol.All(int, vol.Range(min=1, max=90)),
+                    ): vol.All(int, vol.Range(min=30, max=90)),
                     vol.Optional(
                         CONF_MAX_EVENTS,
                         default=self.config_entry.options.get(

@@ -27,7 +27,7 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_READ_ONLY = "read_only"
 
 # Defaults (aligned with MMM-Exchange where applicable)
-DEFAULT_DAYS_TO_FETCH = 14
+DEFAULT_DAYS_TO_FETCH = 30
 DEFAULT_MAX_EVENTS = 50
 DEFAULT_ALLOW_INSECURE_SSL = False
 DEFAULT_UPDATE_INTERVAL = 5  # minutes

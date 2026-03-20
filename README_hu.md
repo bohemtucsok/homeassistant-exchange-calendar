@@ -3,9 +3,9 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Home Assistant custom integráció Microsoft Exchange naptárakhoz EWS (Exchange Web Services) protokollon keresztül.
+Home Assistant custom integráció Microsoft Exchange naptárakhoz.
 
-Támogatja az **on-premise Exchange** (NTLM) és az **Office 365** (OAuth2) hozzáférést teljes CRUD műveletekkel.
+Támogatja az **on-premise Exchange** (NTLM/Basic, EWS-en keresztül) és az **Office 365** (Microsoft Graph API-n keresztül) hozzáférést teljes CRUD műveletekkel.
 
 > A [MMM-Exchange](https://github.com/bohemtucsok/MMM-Exchange) MagicMirror modul alapján, Python/Home Assistant-ra portolva.
 
@@ -63,7 +63,9 @@ Támogatja az **on-premise Exchange** (NTLM) és az **Office 365** (OAuth2) hozz
 > - `domain` -> Windows domain
 > - `allowInsecureSSL` -> Nem biztonságos SSL
 
-### Office 365 (OAuth2)
+### Office 365 (Graph API)
+
+Microsoft Graph API-t használ Office 365 / Microsoft 365 postafiókokhoz.
 
 #### Előfeltétel: Azure AD alkalmazás regisztráció
 
@@ -76,8 +78,10 @@ Támogatja az **on-premise Exchange** (NTLM) és az **Office 365** (OAuth2) hozz
    - Jegyezd fel az **Értéket** (ez a Client Secret)
 5. Menj az **API engedélyek** > **Engedély hozzáadása**
    - Válaszd a **Microsoft Graph** > **Alkalmazás engedélyek**
-   - Add hozzá: `Calendars.ReadWrite`
-   - Kattints az **Rendszergazdai jóváhagyás megadása** gombra
+   - Add hozzá: `Calendars.ReadWrite` és `User.Read.All`
+   - Kattints az **Rendszergazdai jóváhagyás megadása** gombra mindkét engedélyhez
+
+> **Frissítés v1.x-ről (EWS/OAuth2)?** Hozzá kell adnod a `User.Read.All` Application engedélyt az Azure AD alkalmazásodhoz és meg kell adnod a rendszergazdai jóváhagyást. A meglévő konfiguráció továbbra is működik.
 
 ## Használat
 
@@ -141,7 +145,7 @@ A kezdeti beállítás után módosíthatod az opciókat: **Beállítások** > *
 
 | Opció | Alapérték | Leírás |
 |--------|---------|---------|
-| Előrejelzett napok | 14 | Hány napra előre kérdezze le az eseményeket |
+| Előrejelzett napok | 30 | Hány napra előre kérdezze le az eseményeket (minimum 30) |
 | Max események | 50 | Megjelenített események maximális száma |
 | Frissítési időköz | 5 perc | Milyen gyakran kérdezze le az Exchange szervert |
 
@@ -178,7 +182,8 @@ A kezdeti beállítás után módosíthatod az opciókat: **Beállítások** > *
 - [x] Csak olvasható mód
 - [x] Basic EWS hitelesítés (AWS WorkMail)
 - [x] Hangasszisztens (Assist pipeline) támogatás
-- [ ] **Microsoft Graph API migráció Office 365-höz** — Az EWS [2026 októberében megszűnik Exchange Online-on](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online). Az on-premise (NTLM) nem érintett. Lásd [#3](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/3).
+- [x] **Microsoft Graph API migráció Office 365-höz** — Az Office 365 mostantól Graph API-t használ EWS helyett. Az on-premise (NTLM/Basic) továbbra is EWS-t használ. Lásd [#3](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/3).
+- [x] Múltbeli események böngészése — A naptár nézet mostantól támogatja a múltbeli események megtekintését
 - [ ] Exchange feladatok megjelenítése Home Assistant feladatlista entitásként
 - [ ] Megosztott / szoba naptár támogatás
 - [ ] Több naptár támogatás fiókonként

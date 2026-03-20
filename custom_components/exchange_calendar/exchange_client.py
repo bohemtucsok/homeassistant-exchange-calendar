@@ -6,8 +6,11 @@ using exchangelib instead of httpntlm + raw SOAP XML.
 from __future__ import annotations
 
 import logging
+import warnings
 from datetime import datetime, timedelta, date
 from typing import Any
+
+import urllib3
 
 from exchangelib import (
     Account,
@@ -115,6 +118,7 @@ class ExchangeClient:
         if self._allow_insecure_ssl:
             self._original_adapter_cls = BaseProtocol.HTTP_ADAPTER_CLS
             BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             _LOGGER.warning(
                 "SSL certificate verification DISABLED for Exchange connection. "
                 "Only use this with self-signed certificates."
@@ -226,7 +230,7 @@ class ExchangeClient:
         return self._account
 
     def get_events(
-        self, days_to_fetch: int = 14, max_events: int = 50
+        self, days_to_fetch: int = 30, max_events: int = 50
     ) -> list[dict[str, Any]]:
         """Fetch calendar events.
 
@@ -252,6 +256,40 @@ class ExchangeClient:
             _LOGGER.error("Failed to fetch Exchange events: %s", err)
             self._account = None
             raise ExchangeConnectionError(f"Event fetch failed: {err}") from err
+
+        events.sort(key=lambda e: self._sort_key(e["start"]))
+        return events[:max_events]
+
+    def get_events_range(
+        self, start_dt: datetime, end_dt: datetime, max_events: int = 200
+    ) -> list[dict[str, Any]]:
+        """Fetch calendar events for an arbitrary date range.
+
+        Used by async_get_events() to serve the HA calendar frontend,
+        including past events that the coordinator cache does not hold.
+        """
+        account = self._ensure_connected()
+        tz = account.default_timezone
+
+        ews_start = self._to_ews_datetime(start_dt, tz)
+        ews_end = self._to_ews_datetime(end_dt, tz)
+
+        events = []
+        try:
+            for item in account.calendar.view(
+                start=ews_start, end=ews_end, max_items=max_events
+            ):
+                events.append(self._convert_calendar_item(item))
+        except (
+            TransportError,
+            ErrorMailboxStoreUnavailable,
+            ErrorMailboxMoveInProgress,
+        ) as err:
+            _LOGGER.error("Failed to fetch Exchange events range: %s", err)
+            self._account = None
+            raise ExchangeConnectionError(
+                f"Event range fetch failed: {err}"
+            ) from err
 
         events.sort(key=lambda e: self._sort_key(e["start"]))
         return events[:max_events]
@@ -441,3 +479,39 @@ class ExchangeClient:
             "organizer": organizer_name,
             "is_all_day": item.is_all_day or False,
         }
+
+
+def create_client(
+    auth_type: str,
+    email: str,
+    server: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    domain: str | None = None,
+    client_id: str | None = None,
+    client_secret: str | None = None,
+    tenant_id: str | None = None,
+    allow_insecure_ssl: bool = False,
+):
+    """Factory: return EWS client for NTLM/Basic, Graph client for OAuth2."""
+    if auth_type == AUTH_TYPE_OAUTH2:
+        from .graph_client import GraphCalendarClient
+
+        return GraphCalendarClient(
+            email=email,
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+    return ExchangeClient(
+        auth_type=auth_type,
+        email=email,
+        server=server,
+        username=username,
+        password=password,
+        domain=domain,
+        client_id=client_id,
+        client_secret=client_secret,
+        tenant_id=tenant_id,
+        allow_insecure_ssl=allow_insecure_ssl,
+    )

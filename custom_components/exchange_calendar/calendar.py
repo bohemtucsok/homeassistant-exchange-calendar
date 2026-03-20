@@ -92,17 +92,26 @@ class ExchangeCalendarEntity(
         """Return calendar events within a datetime range.
 
         Used by the calendar view and automations.
-        Filters from coordinator data (no new EWS request).
+        Queries the Exchange server directly for the requested range,
+        so both past and future events are available.
         """
-        if not self.coordinator.data:
-            return []
+        try:
+            raw_events = await hass.async_add_executor_job(
+                self.coordinator.client.get_events_range,
+                start_date,
+                end_date,
+            )
+        except Exception:
+            _LOGGER.debug(
+                "Direct range query failed, falling back to coordinator cache"
+            )
+            raw_events = self.coordinator.data or []
 
         events = []
-        for ev in self.coordinator.data:
+        for ev in raw_events:
             start_dt = self._to_comparable_datetime(ev["start"])
             end_dt = self._to_comparable_datetime(ev["end"])
 
-            # Overlap check: event overlaps with requested range
             if end_dt > start_date and start_dt < end_date:
                 events.append(self._to_calendar_event(ev))
 
