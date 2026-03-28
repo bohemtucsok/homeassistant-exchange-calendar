@@ -19,6 +19,7 @@ from exchangelib import (
     Configuration,
     Credentials,
     DELEGATE,
+    IMPERSONATION,
     EWSDateTime,
     EWSTimeZone,
     NTLM,
@@ -186,11 +187,12 @@ class ExchangeClient:
             _LOGGER.debug("[Exchange] Configuration built OK (server=%s)", self._server)
 
             _LOGGER.debug("[Exchange] Creating Account object for %s...", self._email)
+            access_type = IMPERSONATION if self._auth_type == AUTH_TYPE_OAUTH2 else DELEGATE
             self._account = Account(
                 primary_smtp_address=self._email,
                 config=config,
                 autodiscover=False,
-                access_type=DELEGATE,
+                access_type=access_type,
             )
             _LOGGER.info("[Exchange] Connected successfully to %s as %s", self._server, self._email)
             return self._account
