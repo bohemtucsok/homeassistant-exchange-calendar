@@ -20,9 +20,11 @@ from exchangelib import (
     Credentials,
     DELEGATE,
     IMPERSONATION,
+    Identity,
     EWSDateTime,
     EWSTimeZone,
     NTLM,
+    OAUTH2,
     OAuth2Credentials,
 )
 from exchangelib.winzone import MS_TIMEZONE_TO_IANA_MAP
@@ -144,6 +146,7 @@ class ExchangeClient:
                 client_id=self._client_id,
                 client_secret=self._client_secret,
                 tenant_id=self._tenant_id,
+                identity=Identity(primary_smtp_address=self._email),
             )
 
         raise ValueError(f"Unknown auth type: {self._auth_type}")
@@ -168,6 +171,7 @@ class ExchangeClient:
         return Configuration(
             server="outlook.office365.com",
             credentials=credentials,
+            auth_type=OAUTH2,
         )
 
     def connect(self) -> Account:
