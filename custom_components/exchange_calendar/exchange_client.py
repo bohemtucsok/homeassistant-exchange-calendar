@@ -6,6 +6,8 @@ using exchangelib instead of httpntlm + raw SOAP XML.
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import warnings
 from datetime import datetime, timedelta, date
 from typing import Any
@@ -15,6 +17,7 @@ import urllib3
 from exchangelib import (
     Account,
     BASIC,
+    CBA,
     CalendarItem,
     Configuration,
     Credentials,
@@ -39,12 +42,16 @@ from exchangelib.errors import (
     TransportError,
     UnauthorizedError,
 )
-from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
+from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter, Protocol, TLSClientAuth
 from exchangelib.items import SEND_TO_NONE, SEND_TO_ALL_AND_SAVE_COPY
 
-from .const import AUTH_TYPE_BASIC, AUTH_TYPE_NTLM, AUTH_TYPE_OAUTH2
+from .const import AUTH_TYPE_BASIC, AUTH_TYPE_NTLM, AUTH_TYPE_OAUTH2, AUTH_TYPE_CBA
 
 _LOGGER = logging.getLogger(__name__)
+
+# Global lock for CBA protocol monkey-patching to avoid race conditions
+# when multiple config entries use certificate-based authentication.
+_CBA_GLOBAL_LOCK = threading.Lock()
 
 # Fix for Exchange servers that report "Customized Time Zone" instead of a
 # standard Windows timezone name.  Map it to Europe/Budapest (CET/CEST).
@@ -81,6 +88,9 @@ class ExchangeClient:
         client_id: str | None = None,
         client_secret: str | None = None,
         tenant_id: str | None = None,
+        cert_path: str | None = None,
+        key_path: str | None = None,
+        useragent: str | None = None,
         allow_insecure_ssl: bool = False,
     ) -> None:
         self._auth_type = auth_type
@@ -94,6 +104,9 @@ class ExchangeClient:
         self._client_id = client_id
         self._client_secret = client_secret
         self._tenant_id = tenant_id
+        self._cert_path = cert_path
+        self._key_path = key_path
+        self._useragent = useragent
         self._allow_insecure_ssl = allow_insecure_ssl
         self._account: Account | None = None
         self._original_adapter_cls = None
@@ -153,6 +166,9 @@ class ExchangeClient:
                 identity=Identity(primary_smtp_address=self._email),
             )
 
+        if self._auth_type == AUTH_TYPE_CBA:
+            return None
+
         raise ValueError(f"Unknown auth type: {self._auth_type}")
 
     def _build_config(self, credentials) -> Configuration:
@@ -171,12 +187,151 @@ class ExchangeClient:
                 auth_type=BASIC,
             )
 
+        if self._auth_type == AUTH_TYPE_CBA:
+            return Configuration(
+                server=self._server,
+                auth_type=CBA,
+            )
+
         # OAuth2 - Office 365
         return Configuration(
             server="outlook.office365.com",
             credentials=credentials,
             auth_type=OAUTH2,
         )
+
+    def _create_ews_account(self, config, access_type) -> Account:
+        """Create an EWS Account, optionally with a per-entry User-Agent.
+
+        If ``self._useragent`` is set, a scoped ``Protocol`` subclass is used
+        so the custom User-Agent does not leak to other EWS connections in the
+        HA process.
+        """
+        import exchangelib.account
+
+        if not self._useragent:
+            return Account(
+                primary_smtp_address=self._email,
+                config=config,
+                autodiscover=False,
+                access_type=access_type,
+            )
+
+        class _UAProtocol(Protocol):
+            USERAGENT = self._useragent
+
+        original = exchangelib.account.Protocol
+        with _CBA_GLOBAL_LOCK:
+            try:
+                exchangelib.account.Protocol = _UAProtocol
+                # Ensure a fresh Protocol instance is created with our USERAGENT
+                endpoint = config.service_endpoint or f"https://{self._server}/EWS/Exchange.asmx"
+                cache_key = (endpoint, config.credentials)
+                with Protocol._protocol_cache_lock:
+                    if cache_key in Protocol._protocol_cache:
+                        del Protocol._protocol_cache[cache_key]
+                return Account(
+                    primary_smtp_address=self._email,
+                    config=config,
+                    autodiscover=False,
+                    access_type=access_type,
+                )
+            finally:
+                exchangelib.account.Protocol = original
+
+    def _connect_cba(self) -> Account:
+        """Connect using Certificate-Based Authentication (CBA).
+
+        Creates a per-client Protocol subclass so that each integration entry
+        can use its own client certificate without leaking adapter settings to
+        other entries or other exchangelib consumers in the HA process.
+
+        A dynamically-created ``TLSClientAuth`` subclass sets ``cert_file`` to
+        the integration's certificate path.  The subclass is assigned only to
+        the temporary ``Protocol`` replacement inside ``exchangelib.account``,
+        so the global ``BaseProtocol.HTTP_ADAPTER_CLS`` remains untouched.
+        """
+        import exchangelib.account
+
+        if not self._cert_path:
+            raise ExchangeAuthError("Certificate path is required for CBA")
+
+        cert_file = self._cert_path
+        if self._key_path:
+            # exchangelib.TLSClientAuth only supports a single cert_file.
+            # If the user supplied a separate key file we must combine them
+            # into a temporary PEM so that the TLS handshake can present both.
+            import tempfile
+            import atexit
+
+            combined_fd, combined_path = tempfile.mkstemp(suffix=".pem", prefix="exchange_cba_")
+            atexit.register(os.unlink, combined_path)
+            with os.fdopen(combined_fd, "w") as combined_f, \
+                 open(cert_file) as cert_f, \
+                 open(self._key_path) as key_f:
+                combined_f.write(cert_f.read())
+                combined_f.write("\n")
+                combined_f.write(key_f.read())
+            cert_file = combined_path
+
+        _cba_cert_file = cert_file
+
+        class _CBATLSAdapter(TLSClientAuth):
+            """Adapter scoped to this integration entry's certificate."""
+            cert_file = _cba_cert_file
+
+        class _CBAProtocol(Protocol):
+            """Protocol that uses the entry-scoped TLS adapter and User-Agent."""
+            HTTP_ADAPTER_CLS = _CBATLSAdapter
+            USERAGENT = self._useragent or Protocol.USERAGENT
+
+        original_account_protocol_cls = exchangelib.account.Protocol
+
+        with _CBA_GLOBAL_LOCK:
+            try:
+                exchangelib.account.Protocol = _CBAProtocol
+
+                # Clear the protocol cache so a fresh _CBAProtocol instance
+                # is created for this entry.
+                endpoint = f"https://{self._server}/EWS/Exchange.asmx"
+                cache_key = (endpoint, None)
+                with Protocol._protocol_cache_lock:
+                    if cache_key in Protocol._protocol_cache:
+                        del Protocol._protocol_cache[cache_key]
+
+                config = Configuration(server=self._server, auth_type=CBA)
+                _LOGGER.debug(
+                    "[Exchange] Creating CBA Account for %s (cert=%s)",
+                    self._email, self._cert_path,
+                )
+                self._account = Account(
+                    primary_smtp_address=self._email,
+                    config=config,
+                    autodiscover=False,
+                    access_type=DELEGATE,
+                )
+                _LOGGER.info(
+                    "[Exchange] CBA connected successfully to %s as %s",
+                    self._server, self._email,
+                )
+                return self._account
+            except (UnauthorizedError, ErrorAccessDenied) as err:
+                _LOGGER.error(
+                    "[Exchange] CBA AUTH FAILED: %s (type: %s)", err, type(err).__name__
+                )
+                raise ExchangeAuthError(f"CBA authentication failed: {err}") from err
+            except (TransportError, AutoDiscoverFailed, ConnectionError) as err:
+                _LOGGER.error(
+                    "[Exchange] CBA CONNECTION FAILED: %s (type: %s)", err, type(err).__name__
+                )
+                raise ExchangeConnectionError(f"CBA connection failed: {err}") from err
+            except Exception as err:
+                _LOGGER.error(
+                    "[Exchange] CBA UNEXPECTED ERROR: %s (type: %s)", err, type(err).__name__
+                )
+                raise ExchangeConnectionError(f"CBA unexpected error: {err}") from err
+            finally:
+                exchangelib.account.Protocol = original_account_protocol_cls
 
     def connect(self) -> Account:
         """Connect to Exchange server. SYNCHRONOUS - must run in executor."""
@@ -186,6 +341,14 @@ class ExchangeClient:
             self._auth_type, self._server, self._email, self._username,
             self._domain, self._allow_insecure_ssl,
         )
+
+        if self._auth_type == AUTH_TYPE_CBA:
+            self._setup_ssl()
+            try:
+                return self._connect_cba()
+            finally:
+                self._restore_ssl()
+
         self._setup_ssl()
         try:
             credentials = self._build_credentials()
@@ -196,12 +359,7 @@ class ExchangeClient:
 
             _LOGGER.debug("[Exchange] Creating Account object for %s...", self._email)
             access_type = IMPERSONATION if self._auth_type == AUTH_TYPE_OAUTH2 else DELEGATE
-            self._account = Account(
-                primary_smtp_address=self._email,
-                config=config,
-                autodiscover=False,
-                access_type=access_type,
-            )
+            self._account = self._create_ews_account(config, access_type)
             _LOGGER.info("[Exchange] Connected successfully to %s as %s", self._server, self._email)
             return self._account
         except (UnauthorizedError, ErrorAccessDenied) as err:
@@ -524,8 +682,7 @@ class ExchangeClient:
             return date(ews_dt.year, ews_dt.month, ews_dt.day)
         return ews_dt
 
-    @staticmethod
-    def _convert_calendar_item(item: CalendarItem) -> dict[str, Any]:
+    def _convert_calendar_item(self, item: CalendarItem) -> dict[str, Any]:
         """Convert exchangelib CalendarItem to dict.
 
         Field mapping from MMM-Exchange parseXmlResponse():
@@ -534,7 +691,14 @@ class ExchangeClient:
           end -> end
           location -> location
           organizer -> organizer (stored separately)
+
+        If the server does not provide a timezone for a field, it is
+        interpreted in the mailbox's default timezone so that conversion
+        to Home Assistant local time works correctly.
         """
+        account = self._ensure_connected()
+        default_tz = account.default_timezone
+
         if item.is_all_day:
             start = item.start
             end = item.end
@@ -554,6 +718,12 @@ class ExchangeClient:
         else:
             start = ExchangeClient._to_python_dt(item.start)
             end = ExchangeClient._to_python_dt(item.end)
+            # Fallback: if the server omitted timezone info, use the
+            # mailbox's default timezone instead of assuming HA local time.
+            if isinstance(start, datetime) and start.tzinfo is None:
+                start = start.replace(tzinfo=default_tz)
+            if isinstance(end, datetime) and end.tzinfo is None:
+                end = end.replace(tzinfo=default_tz)
 
         organizer_name = ""
         if item.organizer:
@@ -585,9 +755,12 @@ def create_client(
     client_id: str | None = None,
     client_secret: str | None = None,
     tenant_id: str | None = None,
+    cert_path: str | None = None,
+    key_path: str | None = None,
+    useragent: str | None = None,
     allow_insecure_ssl: bool = False,
 ):
-    """Factory: return EWS client for NTLM/Basic, Graph client for OAuth2."""
+    """Factory: return EWS client for NTLM/Basic/CBA, Graph client for OAuth2."""
     if auth_type == AUTH_TYPE_OAUTH2:
         from .graph_client import GraphCalendarClient
 
@@ -607,5 +780,8 @@ def create_client(
         client_id=client_id,
         client_secret=client_secret,
         tenant_id=tenant_id,
+        cert_path=cert_path,
+        key_path=key_path,
+        useragent=useragent,
         allow_insecure_ssl=allow_insecure_ssl,
     )

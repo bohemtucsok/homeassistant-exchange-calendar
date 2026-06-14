@@ -17,13 +17,15 @@
           "username": "Username (optional, if different from email)",
           "password": "Password",
           "domain": "Windows domain (optional)",
+          "useragent": "Custom User-Agent (optional)",
           "allow_insecure_ssl": "Allow insecure SSL (self-signed certificates)"
         },
         "data_description": {
           "server": "e.g., mail.example.com",
           "email": "e.g., user@example.com",
           "username": "Leave empty to use email address",
-          "domain": "e.g., MYDOMAIN (for DOMAIN\\username format)"
+          "domain": "e.g., MYDOMAIN (for DOMAIN\\username format)",
+          "useragent": "e.g., Microsoft Outlook/16.0 (Android; en-US)"
         }
       },
       "basic": {
@@ -33,12 +35,33 @@
           "server": "EWS server hostname",
           "email": "Email address",
           "username": "Username (optional, if different from email)",
-          "password": "Password"
+          "password": "Password",
+          "useragent": "Custom User-Agent (optional)"
         },
         "data_description": {
           "server": "e.g., ews.mail.us-west-2.awsapps.com",
           "email": "e.g., user@example.com",
-          "username": "Leave empty to use email address"
+          "username": "Leave empty to use email address",
+          "useragent": "e.g., Microsoft Outlook/16.0 (Android; en-US)"
+        }
+      },
+      "cba": {
+        "title": "On-premise Exchange (Certificate)",
+        "description": "Enter your Exchange server details and the path to the client certificate. The PEM file must contain both the certificate and the private key.",
+        "data": {
+          "server": "Exchange server hostname",
+          "email": "Email address",
+          "cert_path": "Path to client certificate (.pem)",
+          "key_path": "Path to private key (optional, if separate)",
+          "useragent": "Custom User-Agent (optional)",
+          "allow_insecure_ssl": "Allow insecure SSL (self-signed certificates)"
+        },
+        "data_description": {
+          "server": "e.g., mail.example.com",
+          "email": "e.g., user@example.com",
+          "cert_path": "Absolute path, e.g. /config/ssl/exchange.pem",
+          "key_path": "Absolute path, only needed if key is in a separate file",
+          "useragent": "e.g., Microsoft Outlook/16.0 (Android; en-US)"
         }
       },
       "oauth2": {
@@ -68,10 +91,12 @@
       },
       "reauth_confirm": {
         "title": "Re-authenticate Exchange",
-        "description": "The credentials for {email} are no longer valid (the password may have expired). Enter the new credentials to reconnect.",
+        "description": "The credentials for {email} are no longer valid (the password or certificate may have expired). Enter the new credentials to reconnect.",
         "data": {
           "password": "New password",
-          "client_secret": "New client secret"
+          "client_secret": "New client secret",
+          "cert_path": "New certificate path",
+          "key_path": "New private key path"
         }
       },
       "reconfigure": {
@@ -79,7 +104,9 @@
         "description": "Update the stored credentials for {email} without removing the integration.",
         "data": {
           "password": "New password",
-          "client_secret": "New client secret"
+          "client_secret": "New client secret",
+          "cert_path": "New certificate path",
+          "key_path": "New private key path"
         }
       }
     },

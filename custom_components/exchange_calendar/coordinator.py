@@ -96,7 +96,9 @@ class ExchangeCalendarCoordinator(
     async def _async_update_data(self) -> dict[str, list[dict[str, Any]]]:
         """Fetch events for each selected calendar.
 
-        exchangelib is synchronous, so we run it via async_add_executor_job.
+        Uses a double-buffer strategy: start from the existing cache and
+        overwrite entries only when the server responds successfully.
+        This prevents flickering (empty calendar) on transient errors.
         """
         await self._async_discover_calendars()
 
@@ -108,16 +110,17 @@ class ExchangeCalendarCoordinator(
         )
 
         keys = self._selected_calendar_keys()
-        result: dict[str, list[dict[str, Any]]] = {}
-        connection_errors = 0
-        last_conn_err: Exception | None = None
+        # Start with a copy of the previous data so stale entries survive.
+        new_data: dict[str, list[dict[str, Any]]] = dict(self.data or {})
+        all_failed = True
 
         for key in keys:
             calendar_id = None if key == DEFAULT_CALENDAR_KEY else key
             try:
-                result[key] = await self.hass.async_add_executor_job(
+                new_data[key] = await self.hass.async_add_executor_job(
                     self.client.get_events, days, max_events, calendar_id
                 )
+                all_failed = False
             except ExchangeAuthError as err:
                 # Trigger the reauth flow so the user can update the (likely
                 # expired) password without removing the integration.
@@ -125,20 +128,15 @@ class ExchangeCalendarCoordinator(
                     f"Exchange authentication error: {err}"
                 ) from err
             except ExchangeConnectionError as err:
-                # One unreachable calendar should not fail the whole refresh.
+                # Keep the stale entry in new_data; do not overwrite it.
                 _LOGGER.warning("Failed to fetch calendar '%s': %s", key, err)
-                result[key] = []
-                connection_errors += 1
-                last_conn_err = err
             except Exception as err:
                 _LOGGER.exception("Unexpected error fetching Exchange events")
                 raise UpdateFailed(f"Unexpected error: {err}") from err
 
-        # If every selected calendar was unreachable, treat it as a refresh
-        # failure so the entities become unavailable instead of showing empty.
-        if keys and connection_errors == len(keys):
-            raise UpdateFailed(
-                f"Exchange server unreachable: {last_conn_err}"
+        if keys and all_failed:
+            _LOGGER.warning(
+                "All selected calendars were unreachable, keeping stale data.",
             )
 
-        return result
+        return new_data

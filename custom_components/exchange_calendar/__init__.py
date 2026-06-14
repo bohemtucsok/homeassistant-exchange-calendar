@@ -19,6 +19,9 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_TENANT_ID,
+    CONF_CERT_PATH,
+    CONF_KEY_PATH,
+    CONF_USERAGENT,
     CONF_ALLOW_INSECURE_SSL,
     DEFAULT_ALLOW_INSECURE_SSL,
 )
@@ -48,6 +51,9 @@ async def async_setup_entry(
         client_id=entry.data.get(CONF_CLIENT_ID),
         client_secret=entry.data.get(CONF_CLIENT_SECRET),
         tenant_id=entry.data.get(CONF_TENANT_ID),
+        cert_path=entry.data.get(CONF_CERT_PATH),
+        key_path=entry.data.get(CONF_KEY_PATH),
+        useragent=entry.data.get(CONF_USERAGENT),
         allow_insecure_ssl=entry.data.get(
             CONF_ALLOW_INSECURE_SSL, DEFAULT_ALLOW_INSECURE_SSL
         ),

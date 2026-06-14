@@ -133,9 +133,25 @@ class ExchangeCalendarEntity(
         """Return calendar events within a datetime range.
 
         Used by the calendar view and automations.
-        Queries the Exchange server directly for the requested range,
-        so both past and future events are available.
+        Prefers the coordinator cache so the calendar panel opens instantly.
+        Only falls back to a live server query when the cache is empty or
+        the requested range lies outside the cached window.
         """
+        # Try the coordinator cache first – fast, no network round-trip.
+        data = self.coordinator.data or {}
+        cached = data.get(self._calendar_key, [])
+        events: list[CalendarEvent] = []
+        for ev in cached:
+            start_dt = self._to_comparable_datetime(ev["start"])
+            end_dt = self._to_comparable_datetime(ev["end"])
+            if end_dt > start_date and start_dt < end_date:
+                events.append(self._to_calendar_event(ev))
+
+        # If the cache already covers this range we are done.
+        if events:
+            return events
+
+        # Cache empty or stale for this view – query the server directly.
         try:
             raw_events = await hass.async_add_executor_job(
                 partial(
@@ -145,18 +161,15 @@ class ExchangeCalendarEntity(
                     calendar_id=self._calendar_id,
                 )
             )
-        except Exception:
-            _LOGGER.debug(
-                "Direct range query failed, falling back to coordinator cache"
+        except Exception as err:
+            _LOGGER.warning(
+                "Direct range query failed for %s: %s", self.entity_id, err,
             )
-            data = self.coordinator.data or {}
-            raw_events = data.get(self._calendar_key, [])
+            return events  # Return whatever we got from cache (may be empty)
 
-        events = []
         for ev in raw_events:
             start_dt = self._to_comparable_datetime(ev["start"])
             end_dt = self._to_comparable_datetime(ev["end"])
-
             if end_dt > start_date and start_dt < end_date:
                 events.append(self._to_calendar_event(ev))
 
