@@ -261,6 +261,8 @@ class ExchangeClient:
                 "organizer",
                 "is_all_day",
                 "categories",
+                "legacy_free_busy_status",
+                "sensitivity",
             ):
                 events.append(self._convert_calendar_item(item))
         except (
@@ -301,7 +303,9 @@ class ExchangeClient:
                 "text_body",
                 "organizer",
                 "is_all_day",
-                "categories",   # ✅ CRUCIAAL
+                "categories",
+                "legacy_free_busy_status",
+                "sensitivity",
             ):
                 events.append(self._convert_calendar_item(item))
         except (
@@ -492,6 +496,8 @@ class ExchangeClient:
                 or getattr(item.organizer, "email_address", "")
                 or ""
             )
+        free_busy_status = getattr(item, "legacy_free_busy_status", None)
+        sensitivity = getattr(item, "sensitivity", None)
 
         return {
             "uid": item.uid or (str(item.id) if item.id else None),
@@ -503,6 +509,8 @@ class ExchangeClient:
             "organizer": organizer_name,
             "is_all_day": item.is_all_day or False,
             "categories": list(item.categories or []),  # to have category
+            "legacy_free_busy_status": str(free_busy_status) if free_busy_status else "",
+            "sensitivity": str(sensitivity) if sensitivity else "",
         }
 
 
