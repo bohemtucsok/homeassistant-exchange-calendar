@@ -170,6 +170,8 @@ class ExchangeCalendarEntity(
             "location": event.location,
             "description": event.description,
             "categories": _get_event_categories(self.coordinator.data, event.uid),
+            "legacy_free_busy_status": _get_event_free_busy_status(self.coordinator.data, event.uid),
+            "sensitivity": _get_event_sensitivity(self.coordinator.data, event.uid),
             "cached_events": len(self.coordinator.data or []),
         }
 
@@ -327,5 +329,28 @@ def _get_event_categories(events: list[dict], uid: str | None) -> list[str]:
     for ev in events:
         if ev.get("uid") == uid:
             return ev.get("categories") or []
+
+    return []
+
+def _get_event_free_busy_status(events: list[dict], uid: str | None) -> str:
+    """Return free/busy status for a given event uid."""
+    if not events or not uid:
+        return []
+
+    for ev in events:
+        if ev.get("uid") == uid:
+            return ev.get("legacy_free_busy_status") or ""
+
+    return []
+
+
+def _get_event_sensitivity(events: list[dict], uid: str | None) -> str:
+    """Return sensitivity (privacy) for a given event uid."""
+    if not events or not uid:
+        return []
+
+    for ev in events:
+        if ev.get("uid") == uid:
+            return ev.get("sensitivity") or ""
 
     return []
