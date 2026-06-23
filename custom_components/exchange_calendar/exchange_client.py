@@ -97,10 +97,6 @@ class ExchangeClient:
         self._allow_insecure_ssl = allow_insecure_ssl
         self._account: Account | None = None
         self._original_adapter_cls = None
-        # Cache of discovered calendar folders, keyed by str(folder.id). Populated
-        # by list_calendars() so that per-calendar queries can resolve a folder
-        # without an extra id->folder round-trip.
-        self._calendar_folders: dict[str, Any] = {}
 
     @staticmethod
     def _clean_server(server: str) -> str:
@@ -239,81 +235,8 @@ class ExchangeClient:
             self.connect()
         return self._account
 
-    # ── Calendar discovery ───────────────────────────────────────────
-
-    def list_calendars(self) -> list[dict[str, Any]]:
-        """Return the mailbox's own calendar folders.
-
-        Includes the default calendar plus its sibling/child folders of class
-        ``IPF.Appointment``. Discovered ``Folder`` objects are cached so that
-        per-calendar event queries can resolve a folder without an id lookup.
-        """
-        account = self._ensure_connected()
-        default = account.calendar
-        default_id = str(default.id)
-
-        self._calendar_folders = {default_id: default}
-        result: list[dict[str, Any]] = [
-            {
-                "id": default_id,
-                "name": default.name,
-                "is_default": True,
-                "can_edit": True,
-            }
-        ]
-
-        # Look at the default calendar's siblings and direct children. Most
-        # secondary calendars created in Outlook live in one of these places.
-        candidates = []
-        try:
-            parent = default.parent
-            if parent is not None:
-                candidates.extend(parent.children)
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("[Exchange] Could not enumerate sibling folders: %s", err)
-        try:
-            candidates.extend(default.children)
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("[Exchange] Could not enumerate child folders: %s", err)
-
-        for folder in candidates:
-            folder_id = str(getattr(folder, "id", "") or "")
-            if not folder_id or folder_id in self._calendar_folders:
-                continue
-            if getattr(folder, "folder_class", None) != "IPF.Appointment":
-                continue
-            self._calendar_folders[folder_id] = folder
-            result.append(
-                {
-                    "id": folder_id,
-                    "name": folder.name,
-                    "is_default": False,
-                    "can_edit": True,
-                }
-            )
-
-        _LOGGER.debug("[Exchange] Discovered %d calendar(s)", len(result))
-        return result
-
-    def _get_calendar_folder(self, calendar_id: str | None):
-        """Resolve a calendar folder by id (None -> default calendar)."""
-        account = self._ensure_connected()
-        if not calendar_id:
-            return account.calendar
-        folder = self._calendar_folders.get(calendar_id)
-        if folder is None:
-            # Cache cold (e.g. after reconnect): rediscover, then retry.
-            self.list_calendars()
-            folder = self._calendar_folders.get(calendar_id)
-        if folder is None:
-            raise ExchangeConnectionError(f"Calendar not found: {calendar_id}")
-        return folder
-
     def get_events(
-        self,
-        days_to_fetch: int = 30,
-        max_events: int = 50,
-        calendar_id: str | None = None,
+        self, days_to_fetch: int = 30, max_events: int = 50
     ) -> list[dict[str, Any]]:
         """Fetch calendar events.
 
@@ -321,15 +244,23 @@ class ExchangeClient:
         calendar.view() automatically expands recurring events.
         """
         account = self._ensure_connected()
-        folder = self._get_calendar_folder(calendar_id)
         tz = account.default_timezone
         now = EWSDateTime.now(tz)
         end = now + timedelta(days=days_to_fetch)
 
         events = []
         try:
-            for item in folder.view(
+            for item in account.calendar.view(
                 start=now, end=end, max_items=max_events
+            ).only(
+                "subject",
+                "start",
+                "end",
+                "location",
+                "text_body",
+                "organizer",
+                "is_all_day",
+                "categories",
             ):
                 events.append(self._convert_calendar_item(item))
         except (
@@ -345,11 +276,7 @@ class ExchangeClient:
         return events[:max_events]
 
     def get_events_range(
-        self,
-        start_dt: datetime,
-        end_dt: datetime,
-        max_events: int = 200,
-        calendar_id: str | None = None,
+        self, start_dt: datetime, end_dt: datetime, max_events: int = 200
     ) -> list[dict[str, Any]]:
         """Fetch calendar events for an arbitrary date range.
 
@@ -357,7 +284,6 @@ class ExchangeClient:
         including past events that the coordinator cache does not hold.
         """
         account = self._ensure_connected()
-        folder = self._get_calendar_folder(calendar_id)
         tz = account.default_timezone
 
         ews_start = self._to_ews_datetime(start_dt, tz)
@@ -365,8 +291,17 @@ class ExchangeClient:
 
         events = []
         try:
-            for item in folder.view(
+            for item in account.calendar.view(
                 start=ews_start, end=ews_end, max_items=max_events
+            ).only(
+                "subject",
+                "start",
+                "end",
+                "location",
+                "text_body",
+                "organizer",
+                "is_all_day",
+                "categories",   # ✅ CRUCIAAL
             ):
                 events.append(self._convert_calendar_item(item))
         except (
@@ -401,11 +336,9 @@ class ExchangeClient:
         end: datetime,
         description: str | None = None,
         location: str | None = None,
-        calendar_id: str | None = None,
     ) -> str:
         """Create a new calendar event. Returns the item UID."""
         account = self._ensure_connected()
-        folder = self._get_calendar_folder(calendar_id)
         tz = account.default_timezone
 
         ews_start = self._to_ews_datetime(start, tz)
@@ -413,7 +346,7 @@ class ExchangeClient:
 
         item = CalendarItem(
             account=account,
-            folder=folder,
+            folder=account.calendar,
             subject=summary,
             start=ews_start,
             end=ews_end,
@@ -432,13 +365,12 @@ class ExchangeClient:
         end: datetime | None = None,
         description: str | None = None,
         location: str | None = None,
-        calendar_id: str | None = None,
     ) -> None:
         """Update an existing calendar event by UID."""
         account = self._ensure_connected()
         tz = account.default_timezone
 
-        item = self._get_item_by_uid(uid, calendar_id)
+        item = self._get_item_by_uid(uid)
         if item is None:
             raise ExchangeConnectionError(f"Event not found: {uid}")
 
@@ -466,23 +398,21 @@ class ExchangeClient:
             )
             _LOGGER.info("Updated Exchange event: %s (fields: %s)", uid, update_fields)
 
-    def delete_event(self, uid: str, calendar_id: str | None = None) -> None:
+    def delete_event(self, uid: str) -> None:
         """Delete a calendar event by UID."""
-        item = self._get_item_by_uid(uid, calendar_id)
+        item = self._get_item_by_uid(uid)
         if item is None:
             raise ExchangeConnectionError(f"Event not found: {uid}")
 
         item.delete(send_meeting_cancellations=SEND_TO_NONE)
         _LOGGER.info("Deleted Exchange event: %s", uid)
 
-    def _get_item_by_uid(
-        self, uid: str, calendar_id: str | None = None
-    ) -> CalendarItem | None:
-        """Find a calendar item by its UID within the target calendar folder."""
-        folder = self._get_calendar_folder(calendar_id)
+    def _get_item_by_uid(self, uid: str) -> CalendarItem | None:
+        """Find a calendar item by its UID."""
+        account = self._ensure_connected()
         try:
             items = list(
-                folder.filter(uid=uid)
+                account.calendar.filter(uid=uid)
             )
             if items:
                 return items[0]
@@ -572,6 +502,7 @@ class ExchangeClient:
             "description": item.text_body or "",
             "organizer": organizer_name,
             "is_all_day": item.is_all_day or False,
+            "categories": list(item.categories or []),  # to have category
         }
 
 
