@@ -169,6 +169,7 @@ class ExchangeCalendarEntity(
             else event.end,
             "location": event.location,
             "description": event.description,
+            "categories": _get_event_categories(self.coordinator.data, event.uid),
             "cached_events": len(self.coordinator.data or []),
         }
 
@@ -317,3 +318,14 @@ def _event_overlaps(
         return False
 
     return event_end_cmp > range_start_cmp and event_start_cmp < range_end_cmp
+
+def _get_event_categories(events: list[dict], uid: str | None) -> list[str]:
+    """Return categories for a given event uid."""
+    if not events or not uid:
+        return []
+
+    for ev in events:
+        if ev.get("uid") == uid:
+            return ev.get("categories") or []
+
+    return []
