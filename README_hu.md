@@ -168,6 +168,17 @@ A kezdeti beállítás után módosíthatod az opciókat: **Beállítások** > *
 - On-premise NTLM kapcsolatoknál erősen ajánlott az Exchange-et megbízható belső hálózaton vagy VPN-en keresztül elérni
 - Lehetőség szerint használj dedikált szolgáltatásfiókot minimális jogosultságokkal
 
+## Teljesítmény, robusztusság és extra attribútumok
+
+- **Cache-first naptárnézet** — az integráció egy előre eső esemény-ablakot tart fenn (a mai nap kezdetétől, `Előrejelzett napok száma` napra). Az ebbe az ablakba eső naptárpanel-kérések azonnal a cache-ből szolgálódnak ki, élő Exchange-hívás nélkül. Az ablakon kívüli tartományok (pl. korábbi hónapok) továbbra is élőben kérdeződnek le, így a múltbeli böngészés működik. Ha egy naptárban több esemény van, mint az `Események maximális száma`, az integráció arra a naptárra élő lekérdezésre vált — emeld a limitet a teljes cache-lefedettséghez.
+- **Nincs villogás átmeneti hibánál** — ha egy naptár frissítése nem sikerül, az utoljára ismert események megmaradnak. Ha a szerver teljesen elérhetetlen, az entitások `unavailable` állapotba kerülnek, de az utolsó adatot megőrzik.
+- **Robusztus eseménykezelés** — a hibás Exchange-események (`end` a `start` előtt, egész napos esemény exkluzív vég nélkül, vegyes dátum/időpont határok, időzóna nélküli időbélyegek, túl hosszú tárgy) normalizálva vannak, így nem törik meg a naptár felületét.
+- **Extra attribútumok** — minden naptár-entitás kiteszi az aktuális/következő esemény `free_busy_status`, `sensitivity` és `categories` mezőit, ami értesítés-automatizmusokhoz hasznos.
+
+### Egyéni User-Agent
+
+Egyes on-premise Exchange szerverek blokkolják vagy korlátozzák az alapértelmezett `exchangelib` User-Agentet (pl. `401 Unauthorized` IIS/NTLM mögött). Egyéni értéket az integráció **Beállítások** (Options) menüjében adhatsz meg, pl. `Microsoft Outlook/16.0 (Android; en-US)`. Megjegyzés: az exchangelib a User-Agentet folyamat-szinten alkalmazza, így a Home Assistant példány összes EWS-kapcsolatára hat. Hagyd üresen az alapértelmezéshez.
+
 ## Követelmények
 
 - Home Assistant 2024.1.0 vagy újabb

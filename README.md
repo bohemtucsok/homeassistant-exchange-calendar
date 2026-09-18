@@ -185,6 +185,17 @@ After initial setup, you can modify these options via **Settings** > **Devices &
 - For on-premise NTLM connections, it is strongly recommended to access Exchange over a trusted internal network or VPN
 - Use a dedicated service account with minimal permissions where possible
 
+## Performance, robustness & extra attributes
+
+- **Cache-first calendar view** — the integration keeps a forward window of events (from the start of the current day, for `Days to fetch ahead` days). Calendar panel requests that fall inside that window are served instantly from the cache, with no live Exchange call. Ranges outside it (e.g. past months) are still fetched live, so past browsing keeps working. If a calendar holds more events than `Maximum number of events`, the integration falls back to live queries for it — raise the limit for full cache coverage.
+- **No flicker on transient errors** — if a calendar fails to refresh, its last known events are kept. If the server is completely unreachable, the entities become `unavailable` while retaining the last data.
+- **Robust event handling** — malformed Exchange events (`end` before `start`, all-day events without an exclusive end, mixed date/datetime bounds, naive timestamps, oversized subjects) are normalized so they no longer break the calendar UI.
+- **Extra attributes** — each calendar entity exposes `free_busy_status`, `sensitivity` and `categories` for its current/next event, handy for notification automations.
+
+### Custom User-Agent
+
+Some on-premise Exchange servers block or throttle the default `exchangelib` User-Agent (e.g. a `401 Unauthorized` behind IIS/NTLM). Set a custom string under the integration's **Configure** (Options) menu, e.g. `Microsoft Outlook/16.0 (Android; en-US)`. Note: exchangelib applies the User-Agent process-wide, so it affects every EWS connection of this Home Assistant instance. Leave it empty to use the default.
+
 ## Requirements
 
 - Home Assistant 2024.1.0 or later

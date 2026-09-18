@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -24,6 +24,8 @@ from .const import (
     CONF_CALENDARS,
     DEFAULT_READ_ONLY,
     DEFAULT_CALENDAR_KEY,
+    MAX_SUMMARY_LENGTH,
+    MAX_DESCRIPTION_LENGTH,
 )
 from .coordinator import ExchangeCalendarCoordinator
 
@@ -105,12 +107,8 @@ class ExchangeCalendarEntity(
                 | CalendarEntityFeature.UPDATE_EVENT
             )
 
-    @property
-    def event(self) -> CalendarEvent | None:
-        """Return the current or next upcoming event.
-
-        Displayed on the calendar card in HA dashboard.
-        """
+    def _current_event_dict(self) -> dict[str, Any] | None:
+        """Return the raw dict of the current or next upcoming event."""
         data = self.coordinator.data or {}
         events = data.get(self._calendar_key, [])
         if not events:
@@ -120,9 +118,42 @@ class ExchangeCalendarEntity(
         for ev in events:
             end_dt = self._to_comparable_datetime(ev["end"])
             if end_dt >= now:
-                return self._to_calendar_event(ev)
+                return ev
 
         return None
+
+    @property
+    def event(self) -> CalendarEvent | None:
+        """Return the current or next upcoming event.
+
+        Displayed on the calendar card in HA dashboard.
+        """
+        ev = self._current_event_dict()
+        return self._to_calendar_event(ev) if ev else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Expose Exchange-specific fields of the current/next event.
+
+        Handy for automations that react to categories or sensitivity.
+        """
+        ev = self._current_event_dict()
+        if not ev:
+            return None
+        return {
+            "free_busy_status": ev.get("free_busy") or "",
+            "sensitivity": ev.get("sensitivity") or "",
+            "categories": list(ev.get("categories") or []),
+        }
+
+    def _cache_covers(self, start_date: datetime, end_date: datetime) -> bool:
+        """Return True if the coordinator cache fully covers the range."""
+        coord = self.coordinator
+        if coord.window_start is None or coord.window_end is None:
+            return False
+        if coord.truncated.get(self._calendar_key):
+            return False
+        return start_date >= coord.window_start and end_date <= coord.window_end
 
     async def async_get_events(
         self,
@@ -132,25 +163,30 @@ class ExchangeCalendarEntity(
     ) -> list[CalendarEvent]:
         """Return calendar events within a datetime range.
 
-        Used by the calendar view and automations.
-        Queries the Exchange server directly for the requested range,
-        so both past and future events are available.
+        Used by the calendar view and automations. Ranges that fall fully
+        inside the coordinator's cached window are served from cache
+        (instant, no network round-trip). Anything else - e.g. past months -
+        is queried live from the server, so past and long-range browsing
+        keep working.
         """
-        try:
-            raw_events = await hass.async_add_executor_job(
-                partial(
-                    self.coordinator.client.get_events_range,
-                    start_date,
-                    end_date,
-                    calendar_id=self._calendar_id,
-                )
-            )
-        except Exception:
-            _LOGGER.debug(
-                "Direct range query failed, falling back to coordinator cache"
-            )
-            data = self.coordinator.data or {}
+        data = self.coordinator.data or {}
+        if self._cache_covers(start_date, end_date):
             raw_events = data.get(self._calendar_key, [])
+        else:
+            try:
+                raw_events = await hass.async_add_executor_job(
+                    partial(
+                        self.coordinator.client.get_events_range,
+                        start_date,
+                        end_date,
+                        calendar_id=self._calendar_id,
+                    )
+                )
+            except Exception:
+                _LOGGER.debug(
+                    "Direct range query failed, falling back to coordinator cache"
+                )
+                raw_events = data.get(self._calendar_key, [])
 
         events = []
         for ev in raw_events:
@@ -240,8 +276,61 @@ class ExchangeCalendarEntity(
         await self.coordinator.async_request_refresh()
 
     @staticmethod
-    def _to_calendar_event(ev: dict[str, Any]) -> CalendarEvent:
+    def _normalize_event(ev: dict[str, Any]) -> dict[str, Any]:
+        """Return a sanitized copy of an event dict.
+
+        Guards against Exchange edge cases that break the HA calendar UI:
+        mixed date/datetime bounds, naive datetimes, ``end < start``,
+        all-day events without an exclusive end, and oversized text.
+        """
+        ev = dict(ev)
+        start = ev.get("start")
+        end = ev.get("end")
+
+        def _is_date(value: Any) -> bool:
+            return isinstance(value, date) and not isinstance(value, datetime)
+
+        # Mixed date/datetime bounds -> promote the date side to local midnight
+        # so both ends share a type (required by CalendarEvent).
+        if _is_date(start) and isinstance(end, datetime):
+            start = dt_util.start_of_local_day(start)
+        elif isinstance(start, datetime) and _is_date(end):
+            end = dt_util.start_of_local_day(end)
+
+        # Naive datetimes -> assume HA local timezone.
+        if isinstance(start, datetime) and start.tzinfo is None:
+            start = start.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        if isinstance(end, datetime) and end.tzinfo is None:
+            end = end.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+
+        # Inverted or degenerate ranges (seen on on-prem Exchange).
+        if start is not None and end is not None:
+            if _is_date(start) and _is_date(end):
+                if end <= start:
+                    end = start + timedelta(days=1)  # all-day: exclusive end
+            elif isinstance(start, datetime) and isinstance(end, datetime):
+                if end < start:
+                    end = start
+
+        ev["start"] = start
+        ev["end"] = end
+
+        summary = ev.get("summary") or "(No subject)"
+        if len(summary) > MAX_SUMMARY_LENGTH:
+            summary = summary[: MAX_SUMMARY_LENGTH - 3] + "..."
+        ev["summary"] = summary
+
+        description = ev.get("description") or ""
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+            description = description[: MAX_DESCRIPTION_LENGTH - 3] + "..."
+        ev["description"] = description
+
+        return ev
+
+    @classmethod
+    def _to_calendar_event(cls, ev: dict[str, Any]) -> CalendarEvent:
         """Convert internal dict to HA CalendarEvent."""
+        ev = cls._normalize_event(ev)
         start = ev["start"]
         end = ev["end"]
 

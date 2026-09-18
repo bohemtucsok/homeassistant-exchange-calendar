@@ -103,10 +103,12 @@
           "days_to_fetch": "Days to fetch ahead",
           "max_events": "Maximum number of events",
           "update_interval": "Update interval (minutes)",
-          "read_only": "Read-only mode (disable create/update/delete)"
+          "read_only": "Read-only mode (disable create/update/delete)",
+          "useragent": "Custom User-Agent (optional)"
         },
         "data_description": {
-          "calendars": "Select which of your calendars are exposed as entities. Each selected calendar becomes its own calendar entity."
+          "calendars": "Select which of your calendars are exposed as entities. Each selected calendar becomes its own calendar entity.",
+          "useragent": "Some on-premise Exchange servers block the default exchangelib User-Agent. Set e.g. 'Microsoft Outlook/16.0 (Android; en-US)'. Applies to all EWS connections of this Home Assistant instance. Leave empty for the default."
         }
       }
     }

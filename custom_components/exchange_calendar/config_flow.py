@@ -27,6 +27,7 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_READ_ONLY,
     CONF_CALENDARS,
+    CONF_USERAGENT,
     AUTH_TYPE_BASIC,
     AUTH_TYPE_NTLM,
     AUTH_TYPE_OAUTH2,
@@ -464,6 +465,10 @@ class ExchangeCalendarOptionsFlow(OptionsFlow):
                         CONF_READ_ONLY, DEFAULT_READ_ONLY
                     ),
                 ): bool,
+                vol.Optional(
+                    CONF_USERAGENT,
+                    default=self.config_entry.options.get(CONF_USERAGENT, ""),
+                ): str,
             }
         )
 

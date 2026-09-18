@@ -82,6 +82,7 @@ class ExchangeClient:
         client_secret: str | None = None,
         tenant_id: str | None = None,
         allow_insecure_ssl: bool = False,
+        useragent: str | None = None,
     ) -> None:
         self._auth_type = auth_type
         self._email = email
@@ -95,6 +96,7 @@ class ExchangeClient:
         self._client_secret = client_secret
         self._tenant_id = tenant_id
         self._allow_insecure_ssl = allow_insecure_ssl
+        self._useragent = useragent
         self._account: Account | None = None
         self._original_adapter_cls = None
         # Cache of discovered calendar folders, keyed by str(folder.id). Populated
@@ -193,6 +195,14 @@ class ExchangeClient:
 
             config = self._build_config(credentials)
             _LOGGER.debug("[Exchange] Configuration built OK (server=%s)", self._server)
+
+            if self._useragent:
+                # exchangelib only supports a process-wide User-Agent (class
+                # attribute) - same pattern as the HTTP_ADAPTER_CLS override in
+                # _setup_ssl(). It applies to every EWS connection in this HA
+                # instance; the last configured value wins.
+                BaseProtocol.USERAGENT = self._useragent
+                _LOGGER.debug("[Exchange] Using custom User-Agent: %s", self._useragent)
 
             _LOGGER.debug("[Exchange] Creating Account object for %s...", self._email)
             access_type = IMPERSONATION if self._auth_type == AUTH_TYPE_OAUTH2 else DELEGATE
@@ -524,8 +534,7 @@ class ExchangeClient:
             return date(ews_dt.year, ews_dt.month, ews_dt.day)
         return ews_dt
 
-    @staticmethod
-    def _convert_calendar_item(item: CalendarItem) -> dict[str, Any]:
+    def _convert_calendar_item(self, item: CalendarItem) -> dict[str, Any]:
         """Convert exchangelib CalendarItem to dict.
 
         Field mapping from MMM-Exchange parseXmlResponse():
@@ -534,6 +543,10 @@ class ExchangeClient:
           end -> end
           location -> location
           organizer -> organizer (stored separately)
+
+        Timed events whose start/end arrive without timezone info are
+        interpreted in the mailbox's default timezone instead of being left
+        naive (which HA would otherwise treat as local time).
         """
         if item.is_all_day:
             start = item.start
@@ -554,6 +567,12 @@ class ExchangeClient:
         else:
             start = ExchangeClient._to_python_dt(item.start)
             end = ExchangeClient._to_python_dt(item.end)
+            # EWSTimeZone is a zoneinfo.ZoneInfo subclass, usable as tzinfo.
+            default_tz = self._ensure_connected().default_timezone
+            if isinstance(start, datetime) and start.tzinfo is None:
+                start = start.replace(tzinfo=default_tz)
+            if isinstance(end, datetime) and end.tzinfo is None:
+                end = end.replace(tzinfo=default_tz)
 
         organizer_name = ""
         if item.organizer:
@@ -572,6 +591,9 @@ class ExchangeClient:
             "description": item.text_body or "",
             "organizer": organizer_name,
             "is_all_day": item.is_all_day or False,
+            "free_busy": item.legacy_free_busy_status or "",
+            "sensitivity": item.sensitivity or "",
+            "categories": list(item.categories or []),
         }
 
 
@@ -586,6 +608,7 @@ def create_client(
     client_secret: str | None = None,
     tenant_id: str | None = None,
     allow_insecure_ssl: bool = False,
+    useragent: str | None = None,
 ):
     """Factory: return EWS client for NTLM/Basic, Graph client for OAuth2."""
     if auth_type == AUTH_TYPE_OAUTH2:
@@ -596,6 +619,7 @@ def create_client(
             tenant_id=tenant_id,
             client_id=client_id,
             client_secret=client_secret,
+            useragent=useragent,
         )
     return ExchangeClient(
         auth_type=auth_type,
@@ -608,4 +632,5 @@ def create_client(
         client_secret=client_secret,
         tenant_id=tenant_id,
         allow_insecure_ssl=allow_insecure_ssl,
+        useragent=useragent,
     )

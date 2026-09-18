@@ -26,6 +26,9 @@ CONF_MAX_EVENTS = "max_events"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_READ_ONLY = "read_only"
 CONF_CALENDARS = "calendars"
+# Optional custom User-Agent for EWS connections. exchangelib only supports a
+# process-wide value, so this applies to every EWS connection in the HA instance.
+CONF_USERAGENT = "useragent"
 
 # Sentinel key for the mailbox's default (primary) calendar. Used both as the
 # coordinator data key and as the stored selection value so that the default
@@ -38,6 +41,11 @@ DEFAULT_MAX_EVENTS = 50
 DEFAULT_ALLOW_INSECURE_SSL = False
 DEFAULT_UPDATE_INTERVAL = 5  # minutes
 DEFAULT_READ_ONLY = False
+
+# Caps applied when converting events for the HA calendar UI. Oversized
+# subjects/bodies coming from Exchange can break the frontend.
+MAX_SUMMARY_LENGTH = 255
+MAX_DESCRIPTION_LENGTH = 4000
 
 # Platforms
 PLATFORMS = ["calendar"]

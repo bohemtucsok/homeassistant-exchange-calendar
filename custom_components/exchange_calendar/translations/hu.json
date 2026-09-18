@@ -103,10 +103,12 @@
           "days_to_fetch": "El\u0151rejelzett napok sz\u00e1ma",
           "max_events": "Esem\u00e9nyek maxim\u00e1lis sz\u00e1ma",
           "update_interval": "Friss\u00edt\u00e9si id\u0151k\u00f6z (perc)",
-          "read_only": "Csak olvashat\u00f3 m\u00f3d (l\u00e9trehoz\u00e1s/m\u00f3dos\u00edt\u00e1s/t\u00f6rl\u00e9s tilt\u00e1sa)"
+          "read_only": "Csak olvashat\u00f3 m\u00f3d (l\u00e9trehoz\u00e1s/m\u00f3dos\u00edt\u00e1s/t\u00f6rl\u00e9s tilt\u00e1sa)",
+          "useragent": "Egy\u00e9ni User-Agent (opcion\u00e1lis)"
         },
         "data_description": {
-          "calendars": "V\u00e1laszd ki, mely napt\u00e1raid jelenjenek meg entit\u00e1sk\u00e9nt. Minden kiv\u00e1lasztott napt\u00e1r k\u00fcl\u00f6n napt\u00e1r-entit\u00e1s lesz."
+          "calendars": "V\u00e1laszd ki, mely napt\u00e1raid jelenjenek meg entit\u00e1sk\u00e9nt. Minden kiv\u00e1lasztott napt\u00e1r k\u00fcl\u00f6n napt\u00e1r-entit\u00e1s lesz.",
+          "useragent": "Egyes on-premise Exchange szerverek blokkolj\u00e1k az alap\u00e9rtelmezett exchangelib User-Agentet. Pl. 'Microsoft Outlook/16.0 (Android; en-US)'. A Home Assistant p\u00e9ld\u00e1ny \u00f6sszes EWS-kapcsolat\u00e1ra \u00e9rv\u00e9nyes. Hagyd \u00fcresen az alap\u00e9rtelmez\u00e9shez."
         }
       }
     }

@@ -36,6 +36,7 @@ class GraphCalendarClient:
         tenant_id: str,
         client_id: str,
         client_secret: str,
+        useragent: str | None = None,  # accepted for factory parity; unused
     ) -> None:
         self._email = email
         self._tenant_id = tenant_id
@@ -244,7 +245,7 @@ class GraphCalendarClient:
             "endDateTime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "$top": str(min(max_events, 1000)),
             "$orderby": "start/dateTime",
-            "$select": "id,subject,start,end,location,body,organizer,isAllDay",
+            "$select": "id,subject,start,end,location,body,organizer,isAllDay,showAs,sensitivity,categories",
         }
 
         events: list[dict[str, Any]] = []
@@ -296,16 +297,19 @@ class GraphCalendarClient:
         """
         self._ensure_token()
 
+        def _to_utc_str(value: datetime) -> str:
+            # Graph expects UTC when the value carries a "Z" suffix; convert
+            # tz-aware inputs instead of mislabelling local times as UTC.
+            if value.tzinfo is not None:
+                value = value.astimezone(timezone.utc)
+            return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
         params = {
-            "startDateTime": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            if start_dt.tzinfo
-            else start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "endDateTime": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            if end_dt.tzinfo
-            else end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "startDateTime": _to_utc_str(start_dt),
+            "endDateTime": _to_utc_str(end_dt),
             "$top": str(min(max_events, 1000)),
             "$orderby": "start/dateTime",
-            "$select": "id,subject,start,end,location,body,organizer,isAllDay",
+            "$select": "id,subject,start,end,location,body,organizer,isAllDay,showAs,sensitivity,categories",
         }
 
         events: list[dict[str, Any]] = []
@@ -502,6 +506,9 @@ class GraphCalendarClient:
             "description": description,
             "organizer": organizer_name,
             "is_all_day": is_all_day,
+            "free_busy": event.get("showAs") or "",
+            "sensitivity": event.get("sensitivity") or "",
+            "categories": list(event.get("categories") or []),
         }
 
     @staticmethod
