@@ -110,6 +110,12 @@ class ExchangeClient:
         self._allow_insecure_ssl = allow_insecure_ssl
         self._account: Account | None = None
         self._original_adapter_cls = None
+        # Cached path of the combined cert+key PEM for CBA (see _connect_cba).
+        # The adapter reads cert_file every time exchangelib builds a new HTTP
+        # session, so the file must outlive a single connect(); it is created
+        # once per client, replaced when the key changes, and removed when the
+        # client is garbage-collected.
+        self._combined_pem_path: str | None = None
         # Cache of discovered calendar folders, keyed by str(folder.id). Populated
         # by list_calendars() so that per-calendar queries can resolve a folder
         # without an extra id->folder round-trip.
@@ -129,6 +135,15 @@ class ExchangeClient:
                 s = s[len(prefix):]
                 break
         return s.rstrip("/")
+
+    def __del__(self) -> None:
+        """Remove the cached combined cert+key PEM, if one was created."""
+        combined_path = getattr(self, "_combined_pem_path", None)
+        if combined_path:
+            try:
+                os.unlink(combined_path)
+            except OSError:
+                pass
 
     def _setup_ssl(self) -> None:
         """Disable SSL verification if needed.
@@ -235,18 +250,31 @@ class ExchangeClient:
         if self._key_path:
             # exchangelib.TLSClientAuth only supports a single cert_file.
             # If the user supplied a separate key file we must combine them
-            # into a temporary PEM so that the TLS handshake can present both.
+            # into one PEM for the TLS handshake. exchangelib reads cert_file
+            # whenever it creates a new HTTP session (session refresh,
+            # reconnect), so the file must live as long as this client: build
+            # it once, cache the path, and drop the previous temp file when a
+            # new one is created. No atexit: the client removes the file in
+            # __del__ so reconnects don't leak temp files or handlers.
             import tempfile
-            import atexit
 
-            combined_fd, combined_path = tempfile.mkstemp(suffix=".pem", prefix="exchange_cba_")
-            atexit.register(os.unlink, combined_path)
-            with os.fdopen(combined_fd, "w") as combined_f, \
-                 open(cert_file) as cert_f, \
-                 open(self._key_path) as key_f:
-                combined_f.write(cert_f.read())
-                combined_f.write("\n")
-                combined_f.write(key_f.read())
+            combined_path = self._combined_pem_path
+            if not (combined_path and os.path.exists(combined_path)):
+                combined_fd, combined_path = tempfile.mkstemp(
+                    suffix=".pem", prefix="exchange_cba_"
+                )
+                with os.fdopen(combined_fd, "w") as combined_f, \
+                     open(cert_file) as cert_f, \
+                     open(self._key_path) as key_f:
+                    combined_f.write(cert_f.read())
+                    combined_f.write("\n")
+                    combined_f.write(key_f.read())
+                if self._combined_pem_path:
+                    try:
+                        os.unlink(self._combined_pem_path)
+                    except OSError:
+                        pass
+                self._combined_pem_path = combined_path
             cert_file = combined_path
 
         _cba_cert_file = cert_file
