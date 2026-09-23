@@ -334,6 +334,34 @@ class ExchangeClient:
                     autodiscover=False,
                     access_type=DELEGATE,
                 )
+                # Guard: the cache-key dance above relies on exchangelib
+                # internals; if a future version changes its Protocol cache,
+                # a cached base Protocol could be reused silently and neither
+                # the client certificate nor the User-Agent would apply.
+                # Catch it loudly instead of failing TLS handshakes with a
+                # mysterious error later.
+                protocol = self._account.protocol
+                if not isinstance(protocol, _CBAProtocol):
+                    _LOGGER.warning(
+                        "[Exchange] CBA guard: Account is using %s instead of "
+                        "the entry-scoped _CBAProtocol; the client certificate "
+                        "or User-Agent may not be applied",
+                        type(protocol).__name__,
+                    )
+                elif protocol.HTTP_ADAPTER_CLS is not _CBATLSAdapter:
+                    _LOGGER.warning(
+                        "[Exchange] CBA guard: Protocol adapter is %s instead "
+                        "of the entry-scoped _CBATLSAdapter; the client "
+                        "certificate may not be applied",
+                        protocol.HTTP_ADAPTER_CLS,
+                    )
+                elif protocol.HTTP_ADAPTER_CLS.cert_file != cert_file:
+                    _LOGGER.warning(
+                        "[Exchange] CBA guard: Protocol cert_file mismatch "
+                        "(%s != %s); the expected client certificate may not "
+                        "be presented",
+                        protocol.HTTP_ADAPTER_CLS.cert_file, cert_file,
+                    )
                 _LOGGER.info(
                     "[Exchange] CBA connected successfully to %s as %s",
                     self._server, self._email,
