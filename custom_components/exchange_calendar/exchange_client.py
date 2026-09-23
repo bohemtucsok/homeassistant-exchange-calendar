@@ -251,9 +251,28 @@ class ExchangeClient:
 
         _cba_cert_file = cert_file
 
-        class _CBATLSAdapter(TLSClientAuth):
-            """Adapter scoped to this integration entry's certificate."""
-            cert_file = _cba_cert_file
+        if self._allow_insecure_ssl:
+            class _CBATLSAdapter(TLSClientAuth):
+                """Entry-scoped adapter: client cert, server verification off."""
+
+                cert_file = _cba_cert_file
+
+                def cert_verify(self, conn, url, verify, cert):
+                    # Same approach as NoVerifyHTTPAdapter: skip server
+                    # verification while still presenting the client cert.
+                    super().cert_verify(conn=conn, url=url, verify=False, cert=cert)
+
+                def get_connection_with_tls_context(
+                    self, request, verify, proxies=None, cert=None
+                ):
+                    # Required for requests >= 2.32.3
+                    return super().get_connection_with_tls_context(
+                        request=request, verify=False, proxies=proxies, cert=cert
+                    )
+        else:
+            class _CBATLSAdapter(TLSClientAuth):
+                """Adapter scoped to this integration entry's certificate."""
+                cert_file = _cba_cert_file
 
         class _CBAProtocol(Protocol):
             """Protocol that uses the entry-scoped TLS adapter and User-Agent."""
