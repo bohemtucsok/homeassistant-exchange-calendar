@@ -21,16 +21,19 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_TENANT_ID,
+    CONF_CERT_PATH,
+    CONF_KEY_PATH,
+    CONF_USERAGENT,
     CONF_ALLOW_INSECURE_SSL,
     CONF_DAYS_TO_FETCH,
     CONF_MAX_EVENTS,
     CONF_UPDATE_INTERVAL,
     CONF_READ_ONLY,
     CONF_CALENDARS,
-    CONF_USERAGENT,
     AUTH_TYPE_BASIC,
     AUTH_TYPE_NTLM,
     AUTH_TYPE_OAUTH2,
+    AUTH_TYPE_CBA,
     DEFAULT_DAYS_TO_FETCH,
     DEFAULT_MAX_EVENTS,
     DEFAULT_ALLOW_INSECURE_SSL,
@@ -76,6 +79,9 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                 client_id=auth_data.get(CONF_CLIENT_ID),
                 client_secret=auth_data.get(CONF_CLIENT_SECRET),
                 tenant_id=auth_data.get(CONF_TENANT_ID),
+                cert_path=auth_data.get(CONF_CERT_PATH),
+                key_path=auth_data.get(CONF_KEY_PATH),
+                useragent=auth_data.get(CONF_USERAGENT),
                 allow_insecure_ssl=auth_data.get(
                     CONF_ALLOW_INSECURE_SSL, DEFAULT_ALLOW_INSECURE_SSL
                 ),
@@ -108,6 +114,8 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_ntlm()
             if auth_type == AUTH_TYPE_BASIC:
                 return await self.async_step_basic()
+            if auth_type == AUTH_TYPE_CBA:
+                return await self.async_step_cba()
             return await self.async_step_oauth2()
 
         return self.async_show_form(
@@ -118,6 +126,7 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                         {
                             AUTH_TYPE_NTLM: "On-premise (NTLM)",
                             AUTH_TYPE_BASIC: "Basic (EWS)",
+                            AUTH_TYPE_CBA: "On-premise (Certificate)",
                             AUTH_TYPE_OAUTH2: "Office 365 (Graph API)",
                         }
                     ),
@@ -225,10 +234,51 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"error_detail": self._last_error_detail},
         )
 
+    async def async_step_cba(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 2b: Certificate-Based Authentication (CBA)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            auth_data = {
+                CONF_AUTH_TYPE: AUTH_TYPE_CBA,
+                CONF_SERVER: user_input[CONF_SERVER],
+                CONF_EMAIL: user_input[CONF_EMAIL],
+                CONF_CERT_PATH: user_input[CONF_CERT_PATH],
+                CONF_KEY_PATH: user_input.get(CONF_KEY_PATH),
+                CONF_ALLOW_INSECURE_SSL: user_input.get(
+                    CONF_ALLOW_INSECURE_SSL, DEFAULT_ALLOW_INSECURE_SSL
+                ),
+            }
+            errors = await self._async_validate_auth(auth_data)
+            if not errors:
+                await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
+                self._abort_if_unique_id_configured()
+                self._auth_data = auth_data
+                return await self.async_step_options()
+
+        return self.async_show_form(
+            step_id="cba",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SERVER): str,
+                    vol.Required(CONF_EMAIL): str,
+                    vol.Required(CONF_CERT_PATH): str,
+                    vol.Optional(CONF_KEY_PATH): str,
+                    vol.Optional(
+                        CONF_ALLOW_INSECURE_SSL, default=DEFAULT_ALLOW_INSECURE_SSL
+                    ): bool,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"error_detail": self._last_error_detail},
+        )
+
     async def async_step_oauth2(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 2b: OAuth2 credentials."""
+        """Step 2c: OAuth2 credentials."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -339,17 +389,24 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Shared handler for the reauth/reconfigure credential update.
 
-        Only the secret field is editable: the password for NTLM/Basic, or the
-        client secret for OAuth2. All other connection details are preserved.
+        Only the secret field is editable: the password for NTLM/Basic, the
+        client secret for OAuth2, or the certificate path for CBA.
+        All other connection details are preserved.
         """
         auth_type = entry.data[CONF_AUTH_TYPE]
-        cred_key = (
-            CONF_CLIENT_SECRET if auth_type == AUTH_TYPE_OAUTH2 else CONF_PASSWORD
-        )
+        if auth_type == AUTH_TYPE_OAUTH2:
+            cred_key = CONF_CLIENT_SECRET
+        elif auth_type == AUTH_TYPE_CBA:
+            cred_key = CONF_CERT_PATH
+        else:
+            cred_key = CONF_PASSWORD
         errors: dict[str, str] = {}
 
         if user_input is not None:
             new_data = {**entry.data, cred_key: user_input[cred_key]}
+            # Also update key path if provided during CBA reconfigure
+            if auth_type == AUTH_TYPE_CBA and CONF_KEY_PATH in user_input:
+                new_data[CONF_KEY_PATH] = user_input[CONF_KEY_PATH]
             errors = await self._async_validate_auth(new_data)
             if not errors:
                 return self.async_update_reload_and_abort(
@@ -358,9 +415,13 @@ class ExchangeCalendarConfigFlow(ConfigFlow, domain=DOMAIN):
                     reason=reason,
                 )
 
+        schema_fields = {vol.Required(cred_key): str}
+        if auth_type == AUTH_TYPE_CBA:
+            schema_fields[vol.Optional(CONF_KEY_PATH)] = str
+
         return self.async_show_form(
             step_id=step_id,
-            data_schema=vol.Schema({vol.Required(cred_key): str}),
+            data_schema=vol.Schema(schema_fields),
             errors=errors,
             description_placeholders={
                 "email": entry.data[CONF_EMAIL],
@@ -396,6 +457,9 @@ class ExchangeCalendarOptionsFlow(OptionsFlow):
                 client_id=data.get(CONF_CLIENT_ID),
                 client_secret=data.get(CONF_CLIENT_SECRET),
                 tenant_id=data.get(CONF_TENANT_ID),
+                cert_path=data.get(CONF_CERT_PATH),
+                key_path=data.get(CONF_KEY_PATH),
+                useragent=data.get(CONF_USERAGENT),
                 allow_insecure_ssl=data.get(
                     CONF_ALLOW_INSECURE_SSL, DEFAULT_ALLOW_INSECURE_SSL
                 ),

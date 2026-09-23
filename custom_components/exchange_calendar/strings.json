@@ -41,6 +41,23 @@
           "username": "Leave empty to use email address"
         }
       },
+      "cba": {
+        "title": "On-premise Exchange (Certificate)",
+        "description": "Enter your Exchange server details and the path to the client certificate. The PEM file must contain both the certificate and the private key.",
+        "data": {
+          "server": "Exchange server hostname",
+          "email": "Email address",
+          "cert_path": "Path to client certificate (.pem)",
+          "key_path": "Path to private key (optional, if separate)",
+          "allow_insecure_ssl": "Allow insecure SSL (self-signed certificates)"
+        },
+        "data_description": {
+          "server": "e.g., mail.example.com",
+          "email": "e.g., user@example.com",
+          "cert_path": "Absolute path, e.g. /config/ssl/exchange.pem",
+          "key_path": "Absolute path, only needed if key is in a separate file"
+        }
+      },
       "oauth2": {
         "title": "Office 365 (Graph API)",
         "description": "Enter your Azure AD application credentials. Required Application permissions: Calendars.ReadWrite and User.Read.All (with admin consent).",
