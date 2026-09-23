@@ -260,9 +260,11 @@ class ExchangeClient:
             HTTP_ADAPTER_CLS = _CBATLSAdapter
             USERAGENT = self._useragent or Protocol.USERAGENT
 
-        original_account_protocol_cls = exchangelib.account.Protocol
-
         with _CBA_GLOBAL_LOCK:
+            # Capture the original Protocol inside the lock: if another thread
+            # is mid-patch, reading it outside would restore the patched class
+            # and permanently leak it into exchangelib.account.
+            original_account_protocol_cls = exchangelib.account.Protocol
             try:
                 exchangelib.account.Protocol = _CBAProtocol
 
