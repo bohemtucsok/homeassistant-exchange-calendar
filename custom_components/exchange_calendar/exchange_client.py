@@ -6,6 +6,8 @@ using exchangelib instead of httpntlm + raw SOAP XML.
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import warnings
 from datetime import datetime, timedelta, date
 from typing import Any
@@ -15,6 +17,7 @@ import urllib3
 from exchangelib import (
     Account,
     BASIC,
+    CBA,
     CalendarItem,
     Configuration,
     Credentials,
@@ -39,12 +42,16 @@ from exchangelib.errors import (
     TransportError,
     UnauthorizedError,
 )
-from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
+from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter, Protocol, TLSClientAuth
 from exchangelib.items import SEND_TO_NONE, SEND_TO_ALL_AND_SAVE_COPY
 
-from .const import AUTH_TYPE_BASIC, AUTH_TYPE_NTLM, AUTH_TYPE_OAUTH2
+from .const import AUTH_TYPE_BASIC, AUTH_TYPE_NTLM, AUTH_TYPE_OAUTH2, AUTH_TYPE_CBA
 
 _LOGGER = logging.getLogger(__name__)
+
+# Global lock for CBA protocol monkey-patching to avoid race conditions
+# when multiple config entries use certificate-based authentication.
+_CBA_GLOBAL_LOCK = threading.Lock()
 
 # Fix for Exchange servers that report "Customized Time Zone" instead of a
 # standard Windows timezone name.  Map it to Europe/Budapest (CET/CEST).
@@ -81,8 +88,10 @@ class ExchangeClient:
         client_id: str | None = None,
         client_secret: str | None = None,
         tenant_id: str | None = None,
-        allow_insecure_ssl: bool = False,
+        cert_path: str | None = None,
+        key_path: str | None = None,
         useragent: str | None = None,
+        allow_insecure_ssl: bool = False,
     ) -> None:
         self._auth_type = auth_type
         self._email = email
@@ -95,10 +104,18 @@ class ExchangeClient:
         self._client_id = client_id
         self._client_secret = client_secret
         self._tenant_id = tenant_id
-        self._allow_insecure_ssl = allow_insecure_ssl
+        self._cert_path = cert_path
+        self._key_path = key_path
         self._useragent = useragent
+        self._allow_insecure_ssl = allow_insecure_ssl
         self._account: Account | None = None
         self._original_adapter_cls = None
+        # Cached path of the combined cert+key PEM for CBA (see _connect_cba).
+        # The adapter reads cert_file every time exchangelib builds a new HTTP
+        # session, so the file must outlive a single connect(); it is created
+        # once per client, replaced when the key changes, and removed when the
+        # client is garbage-collected.
+        self._combined_pem_path: str | None = None
         # Cache of discovered calendar folders, keyed by str(folder.id). Populated
         # by list_calendars() so that per-calendar queries can resolve a folder
         # without an extra id->folder round-trip.
@@ -118,6 +135,15 @@ class ExchangeClient:
                 s = s[len(prefix):]
                 break
         return s.rstrip("/")
+
+    def __del__(self) -> None:
+        """Remove the cached combined cert+key PEM, if one was created."""
+        combined_path = getattr(self, "_combined_pem_path", None)
+        if combined_path:
+            try:
+                os.unlink(combined_path)
+            except OSError:
+                pass
 
     def _setup_ssl(self) -> None:
         """Disable SSL verification if needed.
@@ -155,6 +181,9 @@ class ExchangeClient:
                 identity=Identity(primary_smtp_address=self._email),
             )
 
+        if self._auth_type == AUTH_TYPE_CBA:
+            return None
+
         raise ValueError(f"Unknown auth type: {self._auth_type}")
 
     def _build_config(self, credentials) -> Configuration:
@@ -173,12 +202,188 @@ class ExchangeClient:
                 auth_type=BASIC,
             )
 
+        if self._auth_type == AUTH_TYPE_CBA:
+            return Configuration(
+                server=self._server,
+                auth_type=CBA,
+            )
+
         # OAuth2 - Office 365
         return Configuration(
             server="outlook.office365.com",
             credentials=credentials,
             auth_type=OAUTH2,
         )
+
+    def _create_ews_account(self, config, access_type) -> Account:
+        """Create an EWS Account.
+
+        Custom User-Agent (if configured in options) is applied process-wide
+        via ``BaseProtocol.USERAGENT`` in ``connect()`` - the same global
+        approach as the ``HTTP_ADAPTER_CLS`` override in ``_setup_ssl()``.
+        """
+        return Account(
+            primary_smtp_address=self._email,
+            config=config,
+            autodiscover=False,
+            access_type=access_type,
+        )
+
+    def _connect_cba(self) -> Account:
+        """Connect using Certificate-Based Authentication (CBA).
+
+        Creates a per-client Protocol subclass so that each integration entry
+        can use its own client certificate without leaking adapter settings to
+        other entries or other exchangelib consumers in the HA process.
+
+        A dynamically-created ``TLSClientAuth`` subclass sets ``cert_file`` to
+        the integration's certificate path.  The subclass is assigned only to
+        the temporary ``Protocol`` replacement inside ``exchangelib.account``,
+        so the global ``BaseProtocol.HTTP_ADAPTER_CLS`` remains untouched.
+        """
+        import exchangelib.account
+
+        if not self._cert_path:
+            raise ExchangeAuthError("Certificate path is required for CBA")
+
+        cert_file = self._cert_path
+        if self._key_path:
+            # exchangelib.TLSClientAuth only supports a single cert_file.
+            # If the user supplied a separate key file we must combine them
+            # into one PEM for the TLS handshake. exchangelib reads cert_file
+            # whenever it creates a new HTTP session (session refresh,
+            # reconnect), so the file must live as long as this client: build
+            # it once, cache the path, and drop the previous temp file when a
+            # new one is created. No atexit: the client removes the file in
+            # __del__ so reconnects don't leak temp files or handlers.
+            import tempfile
+
+            combined_path = self._combined_pem_path
+            if not (combined_path and os.path.exists(combined_path)):
+                combined_fd, combined_path = tempfile.mkstemp(
+                    suffix=".pem", prefix="exchange_cba_"
+                )
+                with os.fdopen(combined_fd, "w") as combined_f, \
+                     open(cert_file) as cert_f, \
+                     open(self._key_path) as key_f:
+                    combined_f.write(cert_f.read())
+                    combined_f.write("\n")
+                    combined_f.write(key_f.read())
+                if self._combined_pem_path:
+                    try:
+                        os.unlink(self._combined_pem_path)
+                    except OSError:
+                        pass
+                self._combined_pem_path = combined_path
+            cert_file = combined_path
+
+        _cba_cert_file = cert_file
+
+        if self._allow_insecure_ssl:
+            class _CBATLSAdapter(TLSClientAuth):
+                """Entry-scoped adapter: client cert, server verification off."""
+
+                cert_file = _cba_cert_file
+
+                def cert_verify(self, conn, url, verify, cert):
+                    # Same approach as NoVerifyHTTPAdapter: skip server
+                    # verification while still presenting the client cert.
+                    super().cert_verify(conn=conn, url=url, verify=False, cert=cert)
+
+                def get_connection_with_tls_context(
+                    self, request, verify, proxies=None, cert=None
+                ):
+                    # Required for requests >= 2.32.3
+                    return super().get_connection_with_tls_context(
+                        request=request, verify=False, proxies=proxies, cert=cert
+                    )
+        else:
+            class _CBATLSAdapter(TLSClientAuth):
+                """Adapter scoped to this integration entry's certificate."""
+                cert_file = _cba_cert_file
+
+        class _CBAProtocol(Protocol):
+            """Protocol that uses the entry-scoped TLS adapter and User-Agent."""
+            HTTP_ADAPTER_CLS = _CBATLSAdapter
+            USERAGENT = self._useragent or Protocol.USERAGENT
+
+        with _CBA_GLOBAL_LOCK:
+            # Capture the original Protocol inside the lock: if another thread
+            # is mid-patch, reading it outside would restore the patched class
+            # and permanently leak it into exchangelib.account.
+            original_account_protocol_cls = exchangelib.account.Protocol
+            try:
+                exchangelib.account.Protocol = _CBAProtocol
+
+                # Clear the protocol cache so a fresh _CBAProtocol instance
+                # is created for this entry.
+                endpoint = f"https://{self._server}/EWS/Exchange.asmx"
+                cache_key = (endpoint, None)
+                with Protocol._protocol_cache_lock:
+                    if cache_key in Protocol._protocol_cache:
+                        del Protocol._protocol_cache[cache_key]
+
+                config = Configuration(server=self._server, auth_type=CBA)
+                _LOGGER.debug(
+                    "[Exchange] Creating CBA Account for %s (cert=%s)",
+                    self._email, self._cert_path,
+                )
+                self._account = Account(
+                    primary_smtp_address=self._email,
+                    config=config,
+                    autodiscover=False,
+                    access_type=DELEGATE,
+                )
+                # Guard: the cache-key dance above relies on exchangelib
+                # internals; if a future version changes its Protocol cache,
+                # a cached base Protocol could be reused silently and neither
+                # the client certificate nor the User-Agent would apply.
+                # Catch it loudly instead of failing TLS handshakes with a
+                # mysterious error later.
+                protocol = self._account.protocol
+                if not isinstance(protocol, _CBAProtocol):
+                    _LOGGER.warning(
+                        "[Exchange] CBA guard: Account is using %s instead of "
+                        "the entry-scoped _CBAProtocol; the client certificate "
+                        "or User-Agent may not be applied",
+                        type(protocol).__name__,
+                    )
+                elif protocol.HTTP_ADAPTER_CLS is not _CBATLSAdapter:
+                    _LOGGER.warning(
+                        "[Exchange] CBA guard: Protocol adapter is %s instead "
+                        "of the entry-scoped _CBATLSAdapter; the client "
+                        "certificate may not be applied",
+                        protocol.HTTP_ADAPTER_CLS,
+                    )
+                elif protocol.HTTP_ADAPTER_CLS.cert_file != cert_file:
+                    _LOGGER.warning(
+                        "[Exchange] CBA guard: Protocol cert_file mismatch "
+                        "(%s != %s); the expected client certificate may not "
+                        "be presented",
+                        protocol.HTTP_ADAPTER_CLS.cert_file, cert_file,
+                    )
+                _LOGGER.info(
+                    "[Exchange] CBA connected successfully to %s as %s",
+                    self._server, self._email,
+                )
+                return self._account
+            except (UnauthorizedError, ErrorAccessDenied) as err:
+                _LOGGER.error(
+                    "[Exchange] CBA AUTH FAILED: %s (type: %s)", err, type(err).__name__
+                )
+                raise ExchangeAuthError(f"CBA authentication failed: {err}") from err
+            except (TransportError, AutoDiscoverFailed, ConnectionError) as err:
+                _LOGGER.error(
+                    "[Exchange] CBA CONNECTION FAILED: %s (type: %s)", err, type(err).__name__
+                )
+                raise ExchangeConnectionError(f"CBA connection failed: {err}") from err
+            except Exception as err:
+                _LOGGER.error(
+                    "[Exchange] CBA UNEXPECTED ERROR: %s (type: %s)", err, type(err).__name__
+                )
+                raise ExchangeConnectionError(f"CBA unexpected error: {err}") from err
+            finally:
+                exchangelib.account.Protocol = original_account_protocol_cls
 
     def connect(self) -> Account:
         """Connect to Exchange server. SYNCHRONOUS - must run in executor."""
@@ -188,6 +393,14 @@ class ExchangeClient:
             self._auth_type, self._server, self._email, self._username,
             self._domain, self._allow_insecure_ssl,
         )
+
+        if self._auth_type == AUTH_TYPE_CBA:
+            self._setup_ssl()
+            try:
+                return self._connect_cba()
+            finally:
+                self._restore_ssl()
+
         self._setup_ssl()
         try:
             credentials = self._build_credentials()
@@ -206,12 +419,7 @@ class ExchangeClient:
 
             _LOGGER.debug("[Exchange] Creating Account object for %s...", self._email)
             access_type = IMPERSONATION if self._auth_type == AUTH_TYPE_OAUTH2 else DELEGATE
-            self._account = Account(
-                primary_smtp_address=self._email,
-                config=config,
-                autodiscover=False,
-                access_type=access_type,
-            )
+            self._account = self._create_ews_account(config, access_type)
             _LOGGER.info("[Exchange] Connected successfully to %s as %s", self._server, self._email)
             return self._account
         except (UnauthorizedError, ErrorAccessDenied) as err:
@@ -607,10 +815,12 @@ def create_client(
     client_id: str | None = None,
     client_secret: str | None = None,
     tenant_id: str | None = None,
-    allow_insecure_ssl: bool = False,
+    cert_path: str | None = None,
+    key_path: str | None = None,
     useragent: str | None = None,
+    allow_insecure_ssl: bool = False,
 ):
-    """Factory: return EWS client for NTLM/Basic, Graph client for OAuth2."""
+    """Factory: return EWS client for NTLM/Basic/CBA, Graph client for OAuth2."""
     if auth_type == AUTH_TYPE_OAUTH2:
         from .graph_client import GraphCalendarClient
 
@@ -631,6 +841,8 @@ def create_client(
         client_id=client_id,
         client_secret=client_secret,
         tenant_id=tenant_id,
-        allow_insecure_ssl=allow_insecure_ssl,
+        cert_path=cert_path,
+        key_path=key_path,
         useragent=useragent,
+        allow_insecure_ssl=allow_insecure_ssl,
     )

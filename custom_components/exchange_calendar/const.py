@@ -7,6 +7,7 @@ DOMAIN = "exchange_calendar"
 AUTH_TYPE_NTLM = "ntlm"
 AUTH_TYPE_BASIC = "basic"
 AUTH_TYPE_OAUTH2 = "oauth2"
+AUTH_TYPE_CBA = "cba"
 
 # Configuration keys (stored in config_entry.data)
 CONF_AUTH_TYPE = "auth_type"
@@ -18,6 +19,8 @@ CONF_DOMAIN = "domain"
 CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_SECRET = "client_secret"
 CONF_TENANT_ID = "tenant_id"
+CONF_CERT_PATH = "cert_path"
+CONF_KEY_PATH = "key_path"
 CONF_ALLOW_INSECURE_SSL = "allow_insecure_ssl"
 
 # Options keys (stored in config_entry.options)

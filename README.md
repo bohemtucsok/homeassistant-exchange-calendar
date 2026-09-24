@@ -63,6 +63,39 @@ Supports **on-premise Exchange** (NTLM/Basic via EWS) and **Office 365** (via Mi
 > - `domain` -> Windows domain
 > - `allowInsecureSSL` -> Allow insecure SSL
 
+### On-premise Exchange (Certificate-Based Authentication)
+
+For Exchange servers that require client certificate authentication instead of passwords (common in some corporate environments).
+
+#### Prerequisites
+
+1. Export your client certificate as a PEM file containing **both the certificate and private key**.
+   - If your certificate is in PFX format, convert it first:
+     ```bash
+     openssl pkcs12 -in certificate.pfx -out client.pem -nodes
+     ```
+2. Make sure the PEM file **does not have a password** on the private key. If it does, remove it:
+   ```bash
+   openssl rsa -in client.pem -out client_unencrypted.pem
+   ```
+   Then use `client_unencrypted.pem` as the certificate file.
+3. Place the PEM file somewhere accessible by your Home Assistant instance (e.g. `/config/ssl/exchange.pem`).
+
+#### Home Assistant Setup
+
+1. Go to **Settings** > **Devices & Services** > **Add Integration**
+2. Search for "Exchange Calendar"
+3. Select **On-premise (Certificate)**
+4. Fill in:
+   - **Exchange server hostname**: e.g., `mail.example.com`
+   - **Email address**: Your email (e.g., `user@example.com`)
+   - **Path to client certificate**: Absolute path to the PEM file (e.g., `/config/ssl/exchange.pem`)
+   - **Path to private key** (Optional): **Leave empty** in most cases. Only fill this if your private key is stored in a separate file from the certificate.
+   - **Allow insecure SSL**: Enable for self-signed certificates
+5. Configure calendar options
+
+> **Re-authentication**: When your certificate expires, use the integration's **Reconfigure** or **Re-authenticate** menu to update the certificate path without removing the integration.
+
 ### Office 365 (Graph API)
 
 Uses the Microsoft Graph API for Office 365 / Microsoft 365 mailboxes.

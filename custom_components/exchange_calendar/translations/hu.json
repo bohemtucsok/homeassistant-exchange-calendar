@@ -41,6 +41,23 @@
           "username": "Hagyd \u00fcresen az e-mail c\u00edm haszn\u00e1lat\u00e1hoz"
         }
       },
+      "cba": {
+        "title": "On-premise Exchange (Tan\u00fas\u00edtv\u00e1ny)",
+        "description": "Add meg az Exchange szerver adatait \u00e9s az \u00fcgyf\u00e9l-tan\u00fas\u00edtv\u00e1ny el\u00e9r\u00e9si \u00fatj\u00e1t. A PEM f\u00e1jlnak tartalmaznia kell a tan\u00fas\u00edtv\u00e1nyt \u00e9s a priv\u00e1t kulcsot is.",
+        "data": {
+          "server": "Exchange szerver hosztn\u00e9v",
+          "email": "E-mail c\u00edm",
+          "cert_path": "\u00dcgyf\u00e9l-tan\u00fas\u00edtv\u00e1ny \u00fata (.pem)",
+          "key_path": "Priv\u00e1t kulcs \u00fata (opcion\u00e1lis, ha k\u00fcl\u00f6n\u00e1ll\u00f3 f\u00e1jlban van)",
+          "allow_insecure_ssl": "Nem biztons\u00e1gos SSL enged\u00e9lyez\u00e9se (\u00f6nal\u00e1\u00edrt tan\u00fas\u00edtv\u00e1nyok)"
+        },
+        "data_description": {
+          "server": "pl. mail.example.com",
+          "email": "pl. felhasznalo@example.com",
+          "cert_path": "Abszol\u00fat \u00fat, pl. /config/ssl/exchange.pem",
+          "key_path": "Abszol\u00fat \u00fat, csak akkor sz\u00fcks\u00e9ges, ha a kulcs k\u00fcl\u00f6n f\u00e1jlban van"
+        }
+      },
       "oauth2": {
         "title": "Office 365 (Graph API)",
         "description": "Add meg az Azure AD alkalmaz\u00e1s hiteles\u00edt\u0151 adatait. Sz\u00fcks\u00e9ges Application jogosults\u00e1gok: Calendars.ReadWrite \u00e9s User.Read.All (admin j\u00f3v\u00e1hagy\u00e1ssal).",
@@ -68,10 +85,12 @@
       },
       "reauth_confirm": {
         "title": "Exchange \u00fajrahiteles\u00edt\u00e9s",
-        "description": "A(z) {email} fi\u00f3k hiteles\u00edt\u0151 adatai m\u00e1r nem \u00e9rv\u00e9nyesek (lehet, hogy lej\u00e1rt a jelsz\u00f3). Add meg az \u00faj adatokat az \u00fajracsatlakoz\u00e1shoz.",
+        "description": "A(z) {email} fi\u00f3k hiteles\u00edt\u0151 adatai m\u00e1r nem \u00e9rv\u00e9nyesek (lehet, hogy lej\u00e1rt a jelsz\u00f3 vagy a tan\u00fas\u00edtv\u00e1ny). Add meg az \u00faj adatokat az \u00fajracsatlakoz\u00e1shoz.",
         "data": {
           "password": "\u00daj jelsz\u00f3",
-          "client_secret": "\u00daj titkos kulcs (Client Secret)"
+          "client_secret": "\u00daj titkos kulcs (Client Secret)",
+          "cert_path": "\u00daj tan\u00fas\u00edtv\u00e1ny \u00fata",
+          "key_path": "\u00daj priv\u00e1t kulcs \u00fata"
         }
       },
       "reconfigure": {
@@ -79,7 +98,9 @@
         "description": "Friss\u00edtsd a(z) {email} fi\u00f3k t\u00e1rolt hiteles\u00edt\u0151 adatait az integr\u00e1ci\u00f3 elt\u00e1vol\u00edt\u00e1sa n\u00e9lk\u00fcl.",
         "data": {
           "password": "\u00daj jelsz\u00f3",
-          "client_secret": "\u00daj titkos kulcs (Client Secret)"
+          "client_secret": "\u00daj titkos kulcs (Client Secret)",
+          "cert_path": "\u00daj tan\u00fas\u00edtv\u00e1ny \u00fata",
+          "key_path": "\u00daj priv\u00e1t kulcs \u00fata"
         }
       }
     },
