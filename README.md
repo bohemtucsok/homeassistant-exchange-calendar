@@ -5,21 +5,25 @@
 
 A Home Assistant custom integration for Microsoft Exchange calendars.
 
-Supports **on-premise Exchange** (NTLM/Basic via EWS) and **Office 365** (via Microsoft Graph API) with full CRUD operations.
+Supports **on-premise Exchange** (NTLM / Basic / client-certificate via EWS) and **Office 365** (via Microsoft Graph API) with full CRUD operations, multiple calendars per account and past-event browsing.
 
 > Based on the [MMM-Exchange](https://github.com/bohemtucsok/MMM-Exchange) MagicMirror module, ported to Python/Home Assistant.
 
 ## Features
 
 - **Read** calendar events with automatic recurring event expansion
-- **Create** new events from Home Assistant
-- **Update** existing events
-- **Delete** events
+- **Create**, **update** and **delete** events from Home Assistant (optional read-only mode)
+- **Multiple calendars per account** — each selected calendar becomes its own `calendar.*` entity
+- **Past-event browsing** — the calendar panel can go back in time, not just forward
 - On-premise Exchange (NTLM authentication)
 - Basic EWS authentication (AWS WorkMail and similar)
-- Office 365 / Microsoft 365 (OAuth2 authentication)
+- **Certificate-Based Authentication** (client-certificate TLS) for corporate on-premise Exchange
+- Office 365 / Microsoft 365 (Microsoft Graph API)
 - Self-signed SSL certificate support
-- Configurable polling interval, date range, and event limits
+- **Change credentials without re-adding** — automatic re-authentication when a password, secret or certificate expires, plus proactive Reconfigure
+- Cache-first calendar view, no flicker on transient errors, robust handling of malformed events
+- Extra event attributes (`free_busy_status`, `sensitivity`, `categories`) for automations
+- Configurable polling interval, date range, event limits and custom User-Agent
 - **Voice assistant support** (Home Assistant Voice PE / Assist pipeline)
 - Hungarian and English UI translations
 - HACS compatible
@@ -95,6 +99,11 @@ For Exchange servers that require client certificate authentication instead of p
 5. Configure calendar options
 
 > **Re-authentication**: When your certificate expires, use the integration's **Reconfigure** or **Re-authenticate** menu to update the certificate path without removing the integration.
+
+Notes:
+- **Allow insecure SSL** works with certificate auth too: server-certificate verification is skipped while your client certificate is still presented.
+- Certificate connections honour the custom **User-Agent** set in Options.
+- Protect the PEM file — it contains your private key: `chmod 600 /config/ssl/exchange.pem`. If you use a separate key file, the integration combines certificate and key into a private temporary file (owner-only permissions) for the lifetime of the config entry.
 
 ### Office 365 (Graph API)
 
@@ -190,9 +199,12 @@ After initial setup, you can modify these options via **Settings** > **Devices &
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| Days to fetch | 30 | How many days ahead to fetch events (minimum 30) |
-| Max events | 50 | Maximum number of events to display |
+| Calendars to show | primary only | Which of the mailbox's calendars are exposed as entities (multi-select; each becomes its own `calendar.*` entity) |
+| Days to fetch ahead | 30 | Size of the cached forward window, counted from the start of the current day (30–90). Requests inside it are served from cache |
+| Maximum number of events | 50 | Per-calendar cap for the cached window; a calendar with more events falls back to live queries |
 | Update interval | 5 min | How often to poll the Exchange server |
+| Read-only mode | off | Disables create/update/delete on the entities |
+| Custom User-Agent | empty | Overrides the `exchangelib` User-Agent for servers that block it (applies to all EWS connections of this HA instance) |
 
 ## Troubleshooting
 
@@ -206,17 +218,29 @@ After initial setup, you can modify these options via **Settings** > **Devices &
 - NTLM: Try both `user@domain.com` and `DOMAIN\user` formats
 - OAuth2: Verify admin consent was granted for `Calendars.ReadWrite`
 - OAuth2: Ensure the client secret hasn't expired
+- Certificate: the PEM must contain the certificate **and** the unencrypted private key (or point "Path to private key" to a separate key file); the path must be absolute and readable by Home Assistant
+- Certificate: if the certificate expired, use **Re-authenticate** / **Reconfigure** to point to the renewed file
+- `401 Unauthorized` behind IIS/NTLM: try a custom **User-Agent** in Options (see below)
 
 ### No events showing
 - Check that the mailbox has calendar events within the configured date range
-- Increase "Days to fetch" in options
+- Increase "Days to fetch ahead" in options
 - Verify the email address matches the mailbox
+- Looking for a secondary calendar? Select it under **Configure** → **Calendars to show**
+- Past months are fetched live from the server; if that fails the panel shows only cached (upcoming) events — check the HA log for connection errors
+
+### Calendar panel is slow or "cannot load events"
+- Requests inside the cached window are instant; only ranges outside it (e.g. past months) hit the server live
+- Raise "Maximum number of events" if a busy calendar exceeds it — otherwise that calendar always queries live
+- Some servers throttle or block the default `exchangelib` User-Agent — set a custom one in Options
 
 ## Security Considerations
 
 - Always use HTTPS when connecting to your Exchange server
 - For on-premise NTLM connections, it is strongly recommended to access Exchange over a trusted internal network or VPN
 - Use a dedicated service account with minimal permissions where possible
+- Keep client-certificate PEM files private (`chmod 600`) — they contain your private key. With a separate key file the integration keeps a combined copy in a private temporary file for the lifetime of the config entry
+- "Allow insecure SSL" disables server-certificate verification for that connection — use it only for self-signed certificates on trusted networks
 
 ## Performance, robustness & extra attributes
 
@@ -246,6 +270,10 @@ Some on-premise Exchange servers block or throttle the default `exchangelib` Use
 - [x] **Microsoft Graph API migration for Office 365** — Office 365 now uses Graph API instead of EWS. On-premise (NTLM/Basic) continues to use EWS. See [#3](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/3).
 - [x] Past events browsing — Calendar view now supports browsing past events
 - [x] **Multiple calendar support per account** — Expose your additional mailbox calendars as separate entities. Pick them under the integration's **Configure** (Options) menu; each selected calendar becomes its own `calendar.*` entity.
+- [x] **Change credentials without re-adding** — automatic reauth when a password, secret or certificate expires, plus proactive Reconfigure. See [#12](https://github.com/bohemtucsok/homeassistant-exchange-calendar/issues/12).
+- [x] **Performance & robustness** — cache-first calendar view, no-flicker refresh, normalization of malformed events, extra event attributes.
+- [x] **Certificate-Based Authentication (CBA)** for on-premise Exchange — contributed in [#16](https://github.com/bohemtucsok/homeassistant-exchange-calendar/pull/16); currently in community testing.
+- [x] Custom User-Agent option
 - [ ] Exchange Tasks as Home Assistant to-do list entities
 - [ ] Shared / room calendar support
 - [ ] Personal Microsoft account support
