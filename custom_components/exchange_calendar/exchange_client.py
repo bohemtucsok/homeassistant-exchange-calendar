@@ -756,17 +756,23 @@ class ExchangeClient:
         interpreted in the mailbox's default timezone instead of being left
         naive (which HA would otherwise treat as local time).
         """
+        # EWSTimeZone is a zoneinfo.ZoneInfo subclass, usable as tzinfo.
+        default_tz = self._ensure_connected().default_timezone
+
         if item.is_all_day:
             start = item.start
             end = item.end
-            if hasattr(start, "date"):
+            # An all-day bound may arrive as a datetime (midnight in the
+            # mailbox timezone). Take the calendar day in THAT zone: taking
+            # it in UTC can shift the exclusive end back by one day.
+            if isinstance(start, datetime):
+                if start.tzinfo is not None:
+                    start = start.astimezone(default_tz)
                 start = start.date()
-            elif isinstance(start, date):
-                pass
-            if hasattr(end, "date"):
+            if isinstance(end, datetime):
+                if end.tzinfo is not None:
+                    end = end.astimezone(default_tz)
                 end = end.date()
-            elif isinstance(end, date):
-                pass
             # Ensure plain Python date
             if isinstance(start, date) and not isinstance(start, datetime):
                 start = date(start.year, start.month, start.day)

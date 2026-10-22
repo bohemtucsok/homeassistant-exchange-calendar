@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from functools import partial
 from typing import Any
 
@@ -28,6 +28,7 @@ from .const import (
     MAX_DESCRIPTION_LENGTH,
 )
 from .coordinator import ExchangeCalendarCoordinator
+from .event_utils import event_overlaps, normalize_event, to_comparable_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,6 +117,9 @@ class ExchangeCalendarEntity(
 
         now = dt_util.now()
         for ev in events:
+            # Normalize first: an all-day event with a non-exclusive end would
+            # otherwise look as if it ended at midnight and never be "current".
+            ev = self._normalize_event(ev)
             end_dt = self._to_comparable_datetime(ev["end"])
             if end_dt >= now:
                 return ev
@@ -188,12 +192,14 @@ class ExchangeCalendarEntity(
                 )
                 raw_events = data.get(self._calendar_key, [])
 
+        tz = dt_util.DEFAULT_TIME_ZONE
         events = []
         for ev in raw_events:
-            start_dt = self._to_comparable_datetime(ev["start"])
-            end_dt = self._to_comparable_datetime(ev["end"])
-
-            if end_dt > start_date and start_dt < end_date:
+            # Normalize BEFORE the overlap test: Exchange may report an all-day
+            # event with end == start, which would otherwise be filtered out of
+            # every window that starts on that day.
+            ev = self._normalize_event(ev)
+            if event_overlaps(ev, start_date, end_date, tz):
                 events.append(self._to_calendar_event(ev))
 
         return events
@@ -277,55 +283,18 @@ class ExchangeCalendarEntity(
 
     @staticmethod
     def _normalize_event(ev: dict[str, Any]) -> dict[str, Any]:
-        """Return a sanitized copy of an event dict.
+        """Return a sanitized copy of an event dict (see ``event_utils``).
 
-        Guards against Exchange edge cases that break the HA calendar UI:
-        mixed date/datetime bounds, naive datetimes, ``end < start``,
-        all-day events without an exclusive end, and oversized text.
+        Idempotent, so it is safe to call at several layers: before the
+        overlap filter, when picking the current event, and in
+        ``_to_calendar_event``.
         """
-        ev = dict(ev)
-        start = ev.get("start")
-        end = ev.get("end")
-
-        def _is_date(value: Any) -> bool:
-            return isinstance(value, date) and not isinstance(value, datetime)
-
-        # Mixed date/datetime bounds -> promote the date side to local midnight
-        # so both ends share a type (required by CalendarEvent).
-        if _is_date(start) and isinstance(end, datetime):
-            start = dt_util.start_of_local_day(start)
-        elif isinstance(start, datetime) and _is_date(end):
-            end = dt_util.start_of_local_day(end)
-
-        # Naive datetimes -> assume HA local timezone.
-        if isinstance(start, datetime) and start.tzinfo is None:
-            start = start.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
-        if isinstance(end, datetime) and end.tzinfo is None:
-            end = end.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
-
-        # Inverted or degenerate ranges (seen on on-prem Exchange).
-        if start is not None and end is not None:
-            if _is_date(start) and _is_date(end):
-                if end <= start:
-                    end = start + timedelta(days=1)  # all-day: exclusive end
-            elif isinstance(start, datetime) and isinstance(end, datetime):
-                if end < start:
-                    end = start
-
-        ev["start"] = start
-        ev["end"] = end
-
-        summary = ev.get("summary") or "(No subject)"
-        if len(summary) > MAX_SUMMARY_LENGTH:
-            summary = summary[: MAX_SUMMARY_LENGTH - 3] + "..."
-        ev["summary"] = summary
-
-        description = ev.get("description") or ""
-        if len(description) > MAX_DESCRIPTION_LENGTH:
-            description = description[: MAX_DESCRIPTION_LENGTH - 3] + "..."
-        ev["description"] = description
-
-        return ev
+        return normalize_event(
+            ev,
+            dt_util.DEFAULT_TIME_ZONE,
+            max_summary=MAX_SUMMARY_LENGTH,
+            max_description=MAX_DESCRIPTION_LENGTH,
+        )
 
     @classmethod
     def _to_calendar_event(cls, ev: dict[str, Any]) -> CalendarEvent:
@@ -353,10 +322,5 @@ class ExchangeCalendarEntity(
 
     @staticmethod
     def _to_comparable_datetime(value: date | datetime) -> datetime:
-        """Convert date or datetime to timezone-aware datetime for comparison."""
-        if isinstance(value, datetime):
-            if value.tzinfo is None:
-                return value.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
-            return value
-        # date (all-day event) -> start of local day
-        return dt_util.start_of_local_day(value)
+        """Convert date or datetime to a tz-aware datetime for comparison."""
+        return to_comparable_datetime(value, dt_util.DEFAULT_TIME_ZONE)
