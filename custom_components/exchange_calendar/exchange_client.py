@@ -21,6 +21,7 @@ from exchangelib import (
     CalendarItem,
     Configuration,
     Credentials,
+    ExtendedProperty,
     DELEGATE,
     IMPERSONATION,
     Identity,
@@ -35,7 +36,6 @@ from exchangelib.errors import (
     AutoDiscoverFailed,
     ErrorAccessDenied,
     ErrorFolderNotFound,
-    ErrorItemNotFound,
     ErrorMailboxMoveInProgress,
     ErrorMailboxStoreUnavailable,
     ErrorNonExistentMailbox,
@@ -46,6 +46,7 @@ from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter, Protocol, TL
 from exchangelib.items import SEND_TO_NONE, SEND_TO_ALL_AND_SAVE_COPY
 
 from .const import AUTH_TYPE_BASIC, AUTH_TYPE_NTLM, AUTH_TYPE_OAUTH2, AUTH_TYPE_CBA
+from .event_utils import uid_to_global_object_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +58,44 @@ _CBA_GLOBAL_LOCK = threading.Lock()
 # standard Windows timezone name.  Map it to Europe/Budapest (CET/CEST).
 if "Customized Time Zone" not in MS_TIMEZONE_TO_IANA_MAP:
     MS_TIMEZONE_TO_IANA_MAP["Customized Time Zone"] = "Europe/Budapest"
+
+# Some on-prem servers send Windows timezone *display names* (sometimes
+# truncated) instead of timezone IDs, which exchangelib cannot resolve and
+# logs as "unknown timezone ID". Map the ones reported so far (see #18).
+_WINDOWS_TZ_DISPLAY_NAMES = {
+    "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna": "Europe/Berlin",
+    "(UTC+01:00) Amsterdam, Berlin, B": "Europe/Berlin",
+    "(UTC+01:00) Brussels, Copenhagen, Madrid, Paris": "Europe/Paris",
+    "(UTC+01:00) Brussels, Copenhagen": "Europe/Paris",
+    "(UTC+01:00) Belgrade, Bratislava, Budapest, Ljubljana, Prague": "Europe/Budapest",
+    "(UTC+01:00) Belgrade, Bratislava, Budapest": "Europe/Budapest",
+}
+for _tz_name, _iana in _WINDOWS_TZ_DISPLAY_NAMES.items():
+    MS_TIMEZONE_TO_IANA_MAP.setdefault(_tz_name, _iana)
+
+
+class _GlobalObjectId(ExtendedProperty):
+    """PidLidGlobalObjectId - lets us look up a CalendarItem by its UID.
+
+    EWS cannot restrict a FindItem query on ``calendar:UID`` (exchangelib
+    raises "EWS does not support filtering on field 'uid'"), but it can
+    filter on this binary extended property, which encodes the UID.
+    """
+
+    distinguished_property_set_id = "Meeting"
+    property_id = 3
+    property_type = "Binary"
+
+
+def _register_global_object_id() -> None:
+    """Register the extended property once (idempotent across re-imports)."""
+    try:
+        CalendarItem.register("global_object_id", _GlobalObjectId)
+    except ValueError:
+        pass  # already registered
+
+
+_register_global_object_id()
 
 
 class ExchangeConnectionError(Exception):
@@ -696,16 +735,38 @@ class ExchangeClient:
     def _get_item_by_uid(
         self, uid: str, calendar_id: str | None = None
     ) -> CalendarItem | None:
-        """Find a calendar item by its UID within the target calendar folder."""
+        """Find a calendar item by its UID within the target calendar folder.
+
+        EWS cannot filter on ``calendar:UID`` directly (see #18), so the
+        lookup goes through the GlobalObjectId extended property, which
+        encodes the UID. As a fallback the value is also tried as an EWS item
+        id - that is what we expose when an item carries no UID.
+        """
+        account = self._ensure_connected()
         folder = self._get_calendar_folder(calendar_id)
-        try:
-            items = list(
-                folder.filter(uid=uid)
-            )
+
+        global_object_id = uid_to_global_object_id(uid)
+        if global_object_id is not None:
+            try:
+                items = list(folder.filter(global_object_id=global_object_id))
+            except Exception as err:  # noqa: BLE001 - lookup must not crash CRUD
+                _LOGGER.debug("GlobalObjectId lookup failed for %s: %s", uid, err)
+                items = []
+            # Prefer the exact UID; series exceptions share the object id.
+            for item in items:
+                if item.uid == uid:
+                    return item
             if items:
                 return items[0]
-        except (ErrorItemNotFound, IndexError):
-            pass
+
+        # Fallback: treat the value as an EWS item id.
+        try:
+            for item in account.fetch(ids=[(uid, None)]):
+                if isinstance(item, Exception):
+                    continue
+                return item
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Item id lookup failed for %s: %s", uid, err)
         return None
 
     @staticmethod
@@ -781,8 +842,6 @@ class ExchangeClient:
         else:
             start = ExchangeClient._to_python_dt(item.start)
             end = ExchangeClient._to_python_dt(item.end)
-            # EWSTimeZone is a zoneinfo.ZoneInfo subclass, usable as tzinfo.
-            default_tz = self._ensure_connected().default_timezone
             if isinstance(start, datetime) and start.tzinfo is None:
                 start = start.replace(tzinfo=default_tz)
             if isinstance(end, datetime) and end.tzinfo is None:
